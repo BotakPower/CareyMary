@@ -1,6 +1,10 @@
+<<<<<<< HEAD
+import { app, BrowserWindow, ipcMain } from 'electron';
+=======
 import { app, BrowserWindow, Tray, ipcMain } from 'electron';
 import * as path from 'path';
 import * as dotenv from 'dotenv';
+>>>>>>> da7a0e01d0082500d72088f2e63e2a0f73da52bd
 import { createOverlayWindow } from './overlay-window';
 import { createTray } from './tray';
 import { ScreenMonitor } from '../core/screen-monitor';
@@ -24,6 +28,10 @@ dotenv.config({ path: path.join(__dirname, '..', '..', '.env') });
 const AGORA_ENABLED = (process.env.AGORA_ENABLED ?? 'false').toLowerCase() === 'true';
 const CONTEXT_LOOP_MS = 30_000;
 
+// Chromium could not create its on-disk GPU/shader cache (common on Windows with locked profile dirs).
+// Harmless for CareyMary; this avoids noisy console errors. Remove if you rely on that cache for perf.
+app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
+
 let overlayWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let screenMonitor: ScreenMonitor | null = null;
@@ -34,6 +42,26 @@ let contextLoopHandle: ReturnType<typeof setInterval> | null = null;
 let tickCount = 0;
 let isPaused = false;
 
+<<<<<<< HEAD
+function registerOverlayIpcHandlers(): void {
+  ipcMain.on('overlay:set-passthrough', (_event, passthrough: unknown) => {
+    if (typeof passthrough !== 'boolean') {
+      return;
+    }
+    const win = overlayWindow;
+    if (win && !win.isDestroyed()) {
+      win.setIgnoreMouseEvents(passthrough, { forward: true });
+    }
+  });
+
+  ipcMain.on('overlay:quit', () => {
+    app.quit();
+  });
+}
+
+app.whenReady().then(() => {
+  registerOverlayIpcHandlers();
+=======
 async function startServices(): Promise<void> {
   screenMonitor = new ScreenMonitor();
   timerManager = new TimerManager();
@@ -145,6 +173,7 @@ function kickRTCOnReady(): void {
 }
 
 app.whenReady().then(async () => {
+>>>>>>> da7a0e01d0082500d72088f2e63e2a0f73da52bd
   overlayWindow = createOverlayWindow();
 
   registerMainListeners(() => {

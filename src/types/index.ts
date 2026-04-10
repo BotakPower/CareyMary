@@ -50,8 +50,14 @@ export interface RTCJoinParams {
 // Preload bridge contract - what the renderer sees on window.careymary
 export interface CareyMaryAPI {
   onCharacterState: (callback: (state: CharacterState) => void) => void;
+<<<<<<< HEAD
+  /** true = mouse passes through overlay; false = receive clicks (exit control). */
+  setOverlayPassthrough: (passthrough: boolean) => void;
+  quitCareyMary: () => void;
+=======
   onStartRTC: (callback: (params: RTCJoinParams) => void) => void;
   onStopRTC: (callback: () => void) => void;
   onSetMicEnabled: (callback: (enabled: boolean) => void) => void;
   notifyRendererReady: () => void;
+>>>>>>> da7a0e01d0082500d72088f2e63e2a0f73da52bd
 }

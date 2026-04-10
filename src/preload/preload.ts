@@ -26,6 +26,12 @@ const api: CareyMaryAPI = {
   notifyRendererReady: () => {
     ipcRenderer.send(CHANNELS.rendererReady);
   },
+  setOverlayPassthrough: (passthrough: boolean) => {
+    ipcRenderer.send('overlay:set-passthrough', passthrough);
+  },
+  quitCareyMary: () => {
+    ipcRenderer.send('overlay:quit');
+  },
 };
 
 contextBridge.exposeInMainWorld('careymary', api);
