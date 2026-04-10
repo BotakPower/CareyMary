@@ -83,44 +83,48 @@ export class ScreenMonitor extends EventEmitter {
   }
 
   private async tick(): Promise<void> {
-    // Dynamic import — active-win is ESM only
-    const activeWin = await import('active-win');
-    const result = await activeWin.activeWindow();
+    try {
+      // Dynamic import — active-win is ESM only
+      const activeWin = await import('active-win');
+      const result = await activeWin.activeWindow();
 
-    const now = Date.now();
-    const elapsed = Math.floor((now - this.lastTickTime) / 1000);
-    this.lastTickTime = now;
+      const now = Date.now();
+      const elapsed = Math.max(0, Math.floor((now - this.lastTickTime) / 1000));
+      this.lastTickTime = now;
 
-    const appName = result?.owner?.name ?? 'Unknown';
-    const windowTitle = result?.title ?? appName;
-    const category = this.classifyApp(appName, windowTitle);
-    const prevCategory = this.state.category;
+      const appName = result?.owner?.name ?? 'Unknown';
+      const windowTitle = result?.title ?? appName;
+      const category = this.classifyApp(appName, windowTitle);
+      const prevCategory = this.state.category;
 
-    // Update streaks
-    if (category === 'distraction') {
-      this.state.distractionStreak += elapsed;
-      this.state.productiveStreak = 0;
-    } else if (category === 'productive') {
-      this.state.productiveStreak += elapsed;
-      this.state.distractionStreak = 0;
-    } else {
-      // neutral / break resets both streaks
-      this.state.distractionStreak = 0;
-      this.state.productiveStreak = 0;
-    }
+      // Update streaks
+      if (category === 'distraction') {
+        this.state.distractionStreak += elapsed;
+        this.state.productiveStreak = 0;
+      } else if (category === 'productive') {
+        this.state.productiveStreak += elapsed;
+        this.state.distractionStreak = 0;
+      } else {
+        // neutral / break resets both streaks
+        this.state.distractionStreak = 0;
+        this.state.productiveStreak = 0;
+      }
 
-    // Update activeFor — reset if app changed
-    if (appName !== this.state.appName) {
-      this.state.activeFor = elapsed;
-    } else {
-      this.state.activeFor += elapsed;
-    }
+      // Update activeFor — reset if app changed
+      if (appName !== this.state.appName) {
+        this.state.activeFor = elapsed;
+      } else {
+        this.state.activeFor += elapsed;
+      }
 
-    this.state.appName = appName;
-    this.state.category = category;
+      this.state.appName = appName;
+      this.state.category = category;
 
-    if (category !== prevCategory) {
-      this.emit('change', this.getState());
+      if (category !== prevCategory) {
+        this.emit('change', this.getState());
+      }
+    } catch (err) {
+      console.error('[ScreenMonitor] tick error:', err);
     }
   }
 }
