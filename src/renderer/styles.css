@@ -1,0 +1,17 @@
+html, body {
+  background: transparent;
+  margin: 0;
+  overflow: hidden;
+  width: 200px;
+  height: 200px;
+}
+
+#character {
+  image-rendering: pixelated;
+  font-family: monospace;
+  color: #000;
+  font-size: 20px;
+  text-align: center;
+  padding-top: 90px;
+  user-select: none;
+}
