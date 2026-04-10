@@ -14,6 +14,7 @@ export function createOverlayWindow(): BrowserWindow {
 
   const winWidth = 200;
   const winHeight = 200;
+  // Bottom-left of the primary monitor's *work area* (keeps the character above the taskbar/dock).
   const x = workArea.x;
   const y = workArea.y + workArea.height - winHeight;
 

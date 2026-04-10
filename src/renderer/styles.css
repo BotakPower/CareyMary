@@ -1,3 +1,15 @@
+/*
+ * Sprite grid: 2×2 on careymary-spritesheet.png (2048×1738), cells 1024×869.
+ * --s scales the character to fit the ~200×200 overlay window.
+ */
+:root {
+  --s: 0.19;
+  --frame-w: calc(1024px * var(--s));
+  --frame-h: calc(869px * var(--s));
+  --sheet-w: calc(2048px * var(--s));
+  --sheet-h: calc(1738px * var(--s));
+}
+
 html, body {
   background: transparent;
   margin: 0;
@@ -6,18 +18,62 @@ html, body {
   height: 200px;
 }
 
+/* Pin sprite to bottom-left inside the window; the window itself sits at the monitor's bottom-left (work area). */
+body {
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-start;
+}
+
 #character {
+  width: var(--frame-w);
+  height: var(--frame-h);
+  flex-shrink: 0;
+  padding: 0;
+  box-sizing: border-box;
+  background-image: url('careymary-spritesheet.png');
+  background-repeat: no-repeat;
+  background-size: var(--sheet-w) var(--sheet-h);
   image-rendering: pixelated;
-  font-family: monospace;
-  color: #fff;
-  font-size: 20px;
-  text-align: center;
-  padding-top: 90px;
+  image-rendering: crisp-edges;
   user-select: none;
-  text-shadow:
-    -1px -1px 0 #000,
-    1px -1px 0 #000,
-    -1px 1px 0 #000,
-    1px 1px 0 #000,
-    0 0 4px #000;
+  pointer-events: none;
+}
+
+@keyframes cycle-idle {
+  0%, 24.999% { background-position: 0 0; }
+  25%, 49.999% { background-position: calc(-1 * var(--frame-w)) 0; }
+  50%, 74.999% { background-position: 0 calc(-1 * var(--frame-h)); }
+  75%, 99.999% {
+    background-position: calc(-1 * var(--frame-w)) calc(-1 * var(--frame-h));
+  }
+  100% { background-position: 0 0; }
+}
+
+@keyframes cycle-talk {
+  0%, 49.999% { background-position: 0 0; }
+  50%, 100% { background-position: calc(-1 * var(--frame-w)) 0; }
+}
+
+#character.state-idle {
+  animation: cycle-idle 3.2s linear infinite;
+}
+
+#character.state-talking {
+  animation: cycle-talk 0.45s linear infinite;
+}
+
+#character.state-alert {
+  background-position: calc(-1 * var(--frame-w)) 0;
+  animation: none;
+}
+
+#character.state-happy {
+  background-position: calc(-1 * var(--frame-w)) calc(-1 * var(--frame-h));
+  animation: none;
+}
+
+#character.state-sleeping {
+  background-position: 0 calc(-1 * var(--frame-h));
+  animation: none;
 }
