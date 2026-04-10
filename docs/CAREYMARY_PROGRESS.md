@@ -22,7 +22,7 @@
 | Agora RTC client | Edmund | ✅ shipped (dry-run) | `src/core/agora-rtc.ts` |
 | IPC wiring + main loop | Edmund | ✅ shipped | `src/main/ipc-handlers.ts`, `src/preload/preload.ts`, `src/main/index.ts` |
 | RTC test harness | Edmund | ✅ shipped | `test-harness/rtc-test.html` |
-| System tray | SimYee | ⬜ not started | `src/main/tray.ts` |
+| System tray | SimYee | ✅ merged (needs wiring into main/index.ts) | `src/main/tray.ts` |
 | Character sprite UI | Cody | ⬜ not started | `src/renderer/overlay.ts`, `src/renderer/styles.css`, `assets/careymary-sprite.png` |
 | Real Agora credentials | ZhiHao | ⬜ not started | `.env` |
 
@@ -47,6 +47,16 @@
 - Context loop: 30s tick builds prompt from ScreenMonitor + TimerManager + SessionStats, pushes to AgoraAgent, broadcasts character-state to overlay
 - **Screen monitor swap:** active-win's native N-API binary wouldn't self-register under Electron 33's ABI even after `electron-rebuild`; swapped to `get-windows` (maintained successor, uses a spawned Swift binary — no N-API rebuild needed). macOS grants screen recording permission on first run.
 - Smoke test ✅: `app=Warp category=productive`, zero errors, DRY RUN logs fire every 30s
+
+### 2026-04-10 — Dev 3 System Tray (SimYee) — MERGED
+- `src/main/tray.ts` — tray icon + context menu (mute mic, pause, ack water, ack break, quit)
+- Tray actions fire synthetic `ipcMain.emit()` events on these channels:
+  - `tray:mic-toggle` (payload: `isMuted: boolean`)
+  - `tray:pause-toggle` (payload: `isPaused: boolean`)
+  - `tray:ack-water`
+  - `tray:ack-break`
+- Placeholder transparent PNG used until `assets/tray-icon.png` lands
+- **Still to do (Edmund):** call `createTray()` in `main/index.ts` bootstrap and wire `ipcMain.on('tray:*')` handlers to `AgoraAgent` / `TimerManager`
 
 ### 2026-04-10 — Dev 2 Real Agora Credentials (ZhiHao) — NOT STARTED
 - Fill `.env` with `AGORA_APP_ID`, `AGORA_CUSTOMER_ID`, `AGORA_CUSTOMER_SECRET`, `AGORA_RTC_TOKEN`
