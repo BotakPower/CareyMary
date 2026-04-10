@@ -35,6 +35,12 @@ export function createOverlayWindow(): BrowserWindow {
       preload: path.join(__dirname, '..', 'preload', 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      // CareyMary's overlay is never focused (click-through + transparent), so
+      // Chromium marks it as "background" / "occluded" and aggressively throttles
+      // timers and audio processing in this renderer. That starves Agora's WebRTC
+      // jitter buffer and produces choppy/robotic playback. Disable throttling for
+      // this window — it's intentionally always-on-top and must run at full rate.
+      backgroundThrottling: false,
     },
     ...(process.platform === 'win32' && { backgroundColor: '#00000000' }),
   });

@@ -89,3 +89,55 @@ export function pickCharacterState(
   if (screen.category === 'productive') return 'happy';
   return 'idle';
 }
+
+// ---------------------------------------------------------------------------
+// Local LLM (Ollama) enhancer
+// ---------------------------------------------------------------------------
+// Every context-loop tick we ask a local model to read the user's current
+// state and emit ONE concrete behavioral directive for CareyMary. That
+// directive then gets appended to the system prompt pushed to Agora's LLM —
+// so the voice CareyMary speaks with is informed by local, on-device reasoning
+// about what's happening right now.
+
+export const OLLAMA_ENHANCER_SYSTEM = `You are a behavioral co-pilot for CareyMary, a warm AI mother character who speaks to a user via voice. You are NOT CareyMary. You do not write her dialogue.
+
+Your job: read the user's current state and emit ONE concrete, situation-specific directive telling CareyMary what she should notice or gently comment on in the next few seconds. Be specific — reference the actual app, the actual streak duration, the actual reminder.
+
+RULES:
+- Output exactly ONE sentence. No preamble, no quotes, no bullet points.
+- Reference concrete facts from the state (app name, minutes, reminder type).
+- Prefer gentle redirection over nagging.
+- If the user is in a long productive streak, favor praise and break suggestions.
+- If nothing notable is happening, say so: "Nothing urgent — let her stay quiet."
+
+GOOD EXAMPLES:
+- Notice they've been coding in VSCode for 47 minutes straight — praise them warmly and suggest a short break.
+- They just jumped from Xcode to Twitter after 25 productive minutes; gently ask if they meant to take a break.
+- Water reminder is overdue and they've had zero glasses today — mention it naturally, not as a demand.
+- Nothing urgent — let her stay quiet.
+
+BAD EXAMPLES (do not do these):
+- "Hey sweetie, you've been working so hard!" (this is dialogue, not a directive)
+- "Tell the user to drink water." (too vague, not situational)
+- Multi-sentence directives or any preamble.`;
+
+export function buildOllamaUserPrompt(
+  screen: ScreenState,
+  timers: TimerState,
+  dueReminders: ReminderType[],
+  stats: SessionStats,
+): string {
+  const due = dueReminders.length > 0 ? dueReminders.join(', ') : 'none';
+  return `USER STATE RIGHT NOW:
+- Active app: ${screen.appName || 'unknown'} (${screen.category})
+- Time on current app: ${formatDuration(screen.activeFor)}
+- Productive streak: ${formatDuration(screen.productiveStreak)}
+- Distraction streak: ${formatDuration(screen.distractionStreak)}
+- Session productive total: ${formatDuration(stats.productiveTime)}
+- Session distraction total: ${formatDuration(stats.distractionTime)}
+- Water glasses today: ${timers.waterCount}
+- Breaks taken today: ${timers.breaksTaken}
+- Reminders overdue: ${due}
+
+Emit your one-sentence directive now.`;
+}

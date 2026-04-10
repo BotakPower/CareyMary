@@ -7,9 +7,12 @@ import { ScreenMonitor } from '../core/screen-monitor';
 import { TimerManager } from '../core/timer-manager';
 import { SessionStatsTracker } from '../core/session-stats';
 import { AgoraAgent } from '../core/agora-agent';
+import { OllamaClient } from '../core/ollama-client';
 import {
   buildContextPrompt,
+  buildOllamaUserPrompt,
   CAREYMARY_SYSTEM_PROMPT,
+  OLLAMA_ENHANCER_SYSTEM,
   pickCharacterState,
 } from '../core/context-engine';
 import {
@@ -22,11 +25,22 @@ import {
 dotenv.config({ path: path.join(__dirname, '..', '..', '.env') });
 
 const AGORA_ENABLED = (process.env.AGORA_ENABLED ?? 'false').toLowerCase() === 'true';
+const OLLAMA_ENABLED = (process.env.OLLAMA_ENABLED ?? 'false').toLowerCase() === 'true';
+const OLLAMA_URL = process.env.OLLAMA_URL ?? 'http://localhost:11434';
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? 'llama3.1:8b-instruct';
 const CONTEXT_LOOP_MS = 30_000;
 
 // Chromium could not create its on-disk GPU/shader cache (common on Windows with locked profile dirs).
 // Harmless for CareyMary; this avoids noisy console errors. Remove if you rely on that cache for perf.
 app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
+
+// The overlay window is click-through and never focused, so Chromium marks it
+// "background" / "occluded" and throttles timers + audio processing — that
+// starves Agora's WebRTC jitter buffer and produces choppy playback. These
+// switches complement webPreferences.backgroundThrottling=false on the overlay.
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
+app.commandLine.appendSwitch('disable-background-timer-throttling');
+app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
 
 let overlayWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -34,6 +48,7 @@ let screenMonitor: ScreenMonitor | null = null;
 let timerManager: TimerManager | null = null;
 let sessionStats: SessionStatsTracker | null = null;
 let agoraAgent: AgoraAgent | null = null;
+let ollamaClient: OllamaClient | null = null;
 let contextLoopHandle: ReturnType<typeof setInterval> | null = null;
 let tickCount = 0;
 let isPaused = false;
@@ -78,6 +93,17 @@ async function startServices(): Promise<void> {
 
   console.log(`[main] AgoraAgent initialized (enabled=${AGORA_ENABLED})`);
 
+  ollamaClient = new OllamaClient({
+    url: OLLAMA_URL,
+    model: OLLAMA_MODEL,
+    enabled: OLLAMA_ENABLED,
+    timeoutMs: 4000,
+  });
+
+  console.log(
+    `[main] OllamaClient initialized (enabled=${OLLAMA_ENABLED}, url=${OLLAMA_URL}, model=${OLLAMA_MODEL})`,
+  );
+
   try {
     await agoraAgent.start(CAREYMARY_SYSTEM_PROMPT);
   } catch (err) {
@@ -99,15 +125,32 @@ function startContextLoop(): void {
     const dueReminders = timerManager.getDueReminders();
     const stats = sessionStats.getStats();
 
-    const prompt =
-      CAREYMARY_SYSTEM_PROMPT +
-      '\n\n' +
-      buildContextPrompt(screenState, timerState, dueReminders, stats);
-
     console.log(`[ContextLoop] tick #${tickCount}`);
     console.log(
       `[ContextLoop] app=${screenState.appName} category=${screenState.category} dueReminders=${dueReminders.join(',') || 'none'}`,
     );
+
+    // Ask the local Ollama co-pilot for a situational directive. Bounded by
+    // the client's internal timeout — if Ollama is down or slow, guidance
+    // stays null and we push the base prompt without it. Never blocks.
+    let guidance: string | null = null;
+    if (ollamaClient?.isEnabled()) {
+      guidance = await ollamaClient.generate(
+        OLLAMA_ENHANCER_SYSTEM,
+        buildOllamaUserPrompt(screenState, timerState, dueReminders, stats),
+      );
+      if (guidance) {
+        console.log('[Ollama] guidance:', guidance);
+      } else {
+        console.log('[Ollama] no guidance this tick (disabled, timeout, or error)');
+      }
+    }
+
+    const prompt =
+      CAREYMARY_SYSTEM_PROMPT +
+      '\n\n' +
+      buildContextPrompt(screenState, timerState, dueReminders, stats) +
+      (guidance ? `\n\nLOCAL CO-PILOT DIRECTIVE (from on-device Llama):\n${guidance}` : '');
 
     try {
       await agoraAgent.updateContext(prompt);

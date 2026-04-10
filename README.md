@@ -139,6 +139,41 @@ Leave `AGORA_ENABLED=false` and you can develop against the full context loop wi
 
 On first run macOS will prompt for **Screen Recording** (for `get-windows`) and **Microphone** (for RTC). Both are required for the full experience.
 
+### Optional: local Ollama co-pilot
+
+CareyMary can use a **local Ollama model as a co-pilot** that enriches the system prompt fed to Agora's voice loop. Every 30-second context tick, the main process asks Ollama to read the user's current activity (active app, streaks, overdue reminders, session stats) and emit a one-sentence behavioral directive. That directive is appended to the system prompt Agora's LLM uses for its next utterance — so CareyMary's voice is informed by on-device reasoning about what's happening right now.
+
+This runs **100% locally** — no tunnel, no public URL, no cloud call. Ollama must be running on the same machine as CareyMary.
+
+```env
+OLLAMA_ENABLED=true
+OLLAMA_URL=http://localhost:11434
+OLLAMA_MODEL=llama3.1:8b-instruct
+```
+
+**Setup** (on the machine that will run it):
+
+```bash
+brew install ollama              # or download from ollama.com
+ollama serve                     # starts the server on :11434
+ollama pull llama3.1:8b-instruct # one-time model pull
+```
+
+Then flip `OLLAMA_ENABLED=true` in your `.env` and `npm start`.
+
+**Expected logs on startup and every 30s:**
+
+```
+[main] OllamaClient initialized (enabled=true, url=http://localhost:11434, model=llama3.1:8b-instruct)
+[ContextLoop] tick #1
+[Ollama] guidance: Notice they've been coding in VSCode for 12 minutes — praise the focus and suggest they keep the momentum.
+[AgoraAgent] context updated, prompt length= 2247
+```
+
+**Fully opt-in per machine.** Teammates whose `.env` has `OLLAMA_ENABLED=false` (or unset) run exactly as before — the context loop skips Ollama entirely and pushes the base prompt to Agora. The Ollama client also fails soft: if Ollama is down, slow, or returns an error, the tick proceeds without the guidance rather than blocking the voice loop.
+
+**Architecture note:** this is *not* replacing Agora's LLM — ASR (Deepgram), LLM (openai_gpt_5_mini), and TTS (minimax) still come from the Agora ConvoAI preset. Ollama is a local *prompt enhancer* that runs in the main process between screen-state collection and the `/update` REST call. That's why it doesn't need a tunnel — Agora never calls Ollama; only your own main process does, and the enriched prompt is what reaches Agora.
+
 ## Scripts
 
 | Command | What it does |

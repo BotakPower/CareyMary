@@ -87,10 +87,15 @@ class AgoraRTCClient {
 
     await this.client.join(params.appId, params.channel, params.token, params.uid);
 
+    // AEC/ANS/AGC on the Agora Web SDK mic track share a processing pipeline
+    // with remote playback. In Electron, clock drift between capture and
+    // playback makes the echo canceller drop/clip frames, producing choppy
+    // remote audio. Disable the software processors and rely on the OS —
+    // macOS CoreAudio handles EC cleanly, and we don't need browser AEC.
     this.localAudioTrack = await sdk.createMicrophoneAudioTrack({
-      AEC: true,
-      ANS: true,
-      AGC: true,
+      AEC: false,
+      ANS: false,
+      AGC: false,
     });
     await this.client.publish([this.localAudioTrack]);
 

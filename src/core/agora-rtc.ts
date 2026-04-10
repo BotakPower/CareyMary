@@ -73,10 +73,13 @@ export class AgoraRTCClient {
 
     await this.client.join(config.appId, config.channel, config.token, config.uid);
 
+    // See overlay.ts: AEC/ANS/AGC on the Agora mic track in Electron cause
+    // choppy remote playback (clock drift between capture and playback).
+    // Rely on the OS (macOS CoreAudio) for echo cancellation instead.
     this.localAudioTrack = await (sdk as any).createMicrophoneAudioTrack({
-      AEC: true,
-      ANS: true,
-      AGC: true,
+      AEC: false,
+      ANS: false,
+      AGC: false,
     });
     await this.client.publish([this.localAudioTrack]);
 
