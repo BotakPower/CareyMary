@@ -20,9 +20,41 @@ html, body {
 
 /* Pin sprite to bottom-left inside the window; the window itself sits at the monitor's bottom-left (work area). */
 body {
+  position: relative;
   display: flex;
   align-items: flex-end;
   justify-content: flex-start;
+}
+
+/* White × on dark circle — bottom-right of the overlay so it doesn’t sit on the IDE status bar (branch name, etc.). */
+#exit-careymary {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  z-index: 10;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  border-radius: 50%;
+  font-size: 20px;
+  line-height: 26px;
+  font-weight: 600;
+  color: #ffffff;
+  background: rgba(0, 0, 0, 0.45);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.35);
+  cursor: pointer;
+  pointer-events: auto;
+  user-select: none;
+}
+
+#exit-careymary:hover {
+  background: rgba(0, 0, 0, 0.65);
+}
+
+#exit-careymary:active {
+  background: rgba(40, 0, 0, 0.75);
 }
 
 #character {

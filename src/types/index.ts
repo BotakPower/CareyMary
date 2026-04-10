@@ -41,4 +41,7 @@ export type CharacterState = 'idle' | 'talking' | 'alert' | 'happy' | 'sleeping'
 // Preload bridge contract - what the renderer sees on window.careymary
 export interface CareyMaryAPI {
   onCharacterState: (callback: (state: CharacterState) => void) => void;
+  /** true = mouse passes through overlay; false = receive clicks (exit control). */
+  setOverlayPassthrough: (passthrough: boolean) => void;
+  quitCareyMary: () => void;
 }

@@ -7,6 +7,12 @@ const api: CareyMaryAPI = {
       callback(state);
     });
   },
+  setOverlayPassthrough: (passthrough: boolean) => {
+    ipcRenderer.send('overlay:set-passthrough', passthrough);
+  },
+  quitCareyMary: () => {
+    ipcRenderer.send('overlay:quit');
+  },
 };
 
 contextBridge.exposeInMainWorld('careymary', api);

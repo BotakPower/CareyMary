@@ -6,6 +6,8 @@ type CharacterState = 'idle' | 'talking' | 'alert' | 'happy' | 'sleeping';
 
 interface CareyMaryAPI {
   onCharacterState: (callback: (state: CharacterState) => void) => void;
+  setOverlayPassthrough: (passthrough: boolean) => void;
+  quitCareyMary: () => void;
 }
 
 const STATE_CLASSES: CharacterState[] = [
@@ -24,7 +26,46 @@ function applyCharacterState(el: HTMLElement, state: CharacterState) {
 }
 
 const el = document.getElementById('character');
+const exitBtn = document.getElementById('exit-careymary');
 const api = (window as Window & { careymary?: CareyMaryAPI }).careymary;
+
+function wireExitControl(bridge: CareyMaryAPI): void {
+  if (!exitBtn) {
+    return;
+  }
+
+  let passthrough = true;
+
+  function setPassthrough(next: boolean): void {
+    if (next === passthrough) {
+      return;
+    }
+    passthrough = next;
+    bridge.setOverlayPassthrough(next);
+  }
+
+  document.addEventListener(
+    'mousemove',
+    (ev: MouseEvent) => {
+      const r = exitBtn.getBoundingClientRect();
+      const over =
+        ev.clientX >= r.left &&
+        ev.clientX <= r.right &&
+        ev.clientY >= r.top &&
+        ev.clientY <= r.bottom;
+      setPassthrough(!over);
+    },
+    { passive: true },
+  );
+
+  document.addEventListener('mouseleave', () => {
+    setPassthrough(true);
+  });
+
+  exitBtn.addEventListener('click', () => {
+    bridge.quitCareyMary();
+  });
+}
 
 if (!el) {
   console.warn('#character missing');
@@ -34,6 +75,7 @@ if (!el) {
     api.onCharacterState((state) => {
       applyCharacterState(el, state);
     });
+    wireExitControl(api);
   } else {
     console.warn('window.careymary not available - preload failed?');
   }
