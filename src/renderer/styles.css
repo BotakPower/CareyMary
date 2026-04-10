@@ -32,32 +32,25 @@ body {
   left: 6px;
   bottom: 6px;
   z-index: 10;
-  width: 40px;
-  height: 40px;
+  width: 60px;
+  height: 60px;
   padding: 0;
   margin: 0;
   border: none;
-  border-radius: 10px;
-  font-size: 20px;
-  line-height: 40px;
-  font-weight: 800;
-  color: #ffffff;
-  background: rgba(0, 0, 0, 0.42);
-  box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.35),
-    inset 0 0 0 1px rgba(0, 0, 0, 0.35);
+  border-radius: 0;
+  background: transparent url('./dashboard-btn1.png') center / contain no-repeat;
+  box-shadow: none;
   cursor: pointer;
   pointer-events: auto;
   user-select: none;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 
 #open-dashboard:hover {
-  background: rgba(0, 0, 0, 0.55);
+  filter: brightness(1.08);
 }
 
 #open-dashboard:active {
-  transform: translateY(1px);
+  transform: translateY(1px) scale(0.98);
 }
 
 /* White × on dark circle — bottom-right of the overlay so it doesn’t sit on the IDE status bar (branch name, etc.). */

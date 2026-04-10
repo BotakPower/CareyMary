@@ -107,3 +107,11 @@ html, body {
   color: var(--muted);
 }
 
+.tips {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
