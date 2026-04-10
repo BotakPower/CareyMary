@@ -36,6 +36,9 @@ const api: CareyMaryAPI = {
   logToMain: (message: string) => {
     ipcRenderer.send(CHANNELS.rendererLog, message);
   },
+  toggleDashboard: () => {
+    ipcRenderer.send('dashboard:toggle');
+  },
 };
 
 contextBridge.exposeInMainWorld('careymary', api);

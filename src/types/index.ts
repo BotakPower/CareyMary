@@ -54,9 +54,8 @@ export interface CareyMaryAPI {
   onStopRTC: (callback: () => void) => void;
   onSetMicEnabled: (callback: (enabled: boolean) => void) => void;
   notifyRendererReady: () => void;
-  /** true = mouse passes through overlay; false = receive clicks (exit control). */
   setOverlayPassthrough: (passthrough: boolean) => void;
   quitCareyMary: () => void;
-  /** Forward a renderer log line to the main process terminal. */
   logToMain: (message: string) => void;
+  toggleDashboard: () => void;
 }

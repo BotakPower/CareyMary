@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <title>CareyMary — Dashboard</title>
+    <link rel="stylesheet" href="./dashboard.css">
+  </head>
+  <body>
+    <main class="wrap">
+      <header class="header">
+        <div class="title">Focus dashboard</div>
+        <div class="subtitle">Mock data (demo)</div>
+      </header>
+
+      <section class="cards">
+        <div class="card">
+          <div class="label">Focused</div>
+          <div class="value" id="focused-time">00:00</div>
+          <div class="bar">
+            <div class="fill fill-focus" id="focused-bar" style="width: 0%"></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="label">Distracted</div>
+          <div class="value" id="distracted-time">00:00</div>
+          <div class="bar">
+            <div class="fill fill-distract" id="distracted-bar" style="width: 0%"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card card-wide">
+        <div class="row">
+          <div>
+            <div class="label">Current mode</div>
+            <div class="value value-small" id="mode">Focused</div>
+          </div>
+          <div class="pill" id="streak">Streak: 0:00</div>
+        </div>
+        <div class="hint">This is placeholder UI; wire real stats later from `SessionStatsTracker`.</div>
+      </section>
+    </main>
+
+    <script src="./dashboard.js"></script>
+  </body>
+</html>
+

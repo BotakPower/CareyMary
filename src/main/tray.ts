@@ -32,6 +32,11 @@ export function createTray(): Tray {
   const rebuildMenu = () => {
     const menu = Menu.buildFromTemplate([
       {
+        label: '📊 Dashboard',
+        click: () => ipcMain.emit('tray:toggle-dashboard'),
+      },
+      { type: 'separator' },
+      {
         label: isMuted ? '🎙️ Unmute Mic' : '🎙️ Mute Mic',
         click: () => {
           isMuted = !isMuted;

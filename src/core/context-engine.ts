@@ -84,7 +84,7 @@ INSTRUCTIONS:
 export function pickCharacterState(
   screen: ScreenState,
   dueReminders: ReminderType[],
-): 'idle' | 'happy' | 'alert' {
+): CharacterState {
   if (dueReminders.length > 0) return 'alert';
   if (screen.category === 'productive') return 'happy';
   return 'idle';

@@ -7,10 +7,16 @@
   </head>
   <body>
     <div id="character" role="img" aria-label="CareyMary"></div>
+    <button
+      type="button"
+      id="open-dashboard"
+      aria-label="Open dashboard"
+      title="Dashboard"
+    >
+      ▦
+    </button>
     <button type="button" id="exit-careymary" aria-label="Close CareyMary" title="Close CareyMary">×</button>
-    <!-- Agora RTC SDK loaded as a global script; exposes window.AgoraRTC.
-         Copied into dist/renderer/ by scripts/copy-renderer-assets.js so the
-         path is self-contained and survives electron-builder packaging. -->
+    <!-- Agora RTC SDK loaded as a global script; copied to dist/renderer during build. -->
     <script src="./AgoraRTC_N-production.js"></script>
     <script src="./overlay.js"></script>
   </body>

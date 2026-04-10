@@ -2,6 +2,7 @@ import { app, BrowserWindow, Tray, ipcMain } from 'electron';
 import * as path from 'path';
 import * as dotenv from 'dotenv';
 import { createOverlayWindow } from './overlay-window';
+import { createDashboardWindow } from './dashboard-window';
 import { createTray } from './tray';
 import { ScreenMonitor } from '../core/screen-monitor';
 import { TimerManager } from '../core/timer-manager';
@@ -43,6 +44,7 @@ app.commandLine.appendSwitch('disable-background-timer-throttling');
 app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
 
 let overlayWindow: BrowserWindow | null = null;
+let dashboardWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let screenMonitor: ScreenMonitor | null = null;
 let timerManager: TimerManager | null = null;
@@ -66,6 +68,15 @@ function registerOverlayIpcHandlers(): void {
 
   ipcMain.on('overlay:quit', () => {
     app.quit();
+  });
+
+  ipcMain.on('dashboard:toggle', () => {
+    if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+      dashboardWindow.close();
+      dashboardWindow = null;
+      return;
+    }
+    dashboardWindow = createDashboardWindow();
   });
 }
 
@@ -107,7 +118,7 @@ async function startServices(): Promise<void> {
   try {
     await agoraAgent.start(CAREYMARY_SYSTEM_PROMPT);
   } catch (err) {
-    console.error('[main] AgoraAgent.start failed:', err);
+    console.error('[main] Agora.start failed:', err);
   }
 }
 
@@ -172,11 +183,16 @@ function startContextLoop(): void {
   console.log('[main] Context loop started (first tick in 5s)');
 }
 
-/**
- * Wire tray context-menu clicks into the running services.
- * SimYee's tray.ts fires synthetic ipcMain events — we bridge them here.
- */
 function registerTrayListeners(): void {
+  ipcMain.on('tray:toggle-dashboard', () => {
+    if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+      dashboardWindow.close();
+      dashboardWindow = null;
+      return;
+    }
+    dashboardWindow = createDashboardWindow();
+  });
+
   ipcMain.on('tray:mic-toggle', (_event, muted: boolean) => {
     console.log('[tray] mic-toggle muted=', muted);
     if (overlayWindow) {
@@ -226,7 +242,6 @@ function kickRTCOnReady(): void {
 
 app.whenReady().then(async () => {
   registerOverlayIpcHandlers();
-
   overlayWindow = createOverlayWindow();
 
   registerMainListeners(() => {
