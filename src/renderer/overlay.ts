@@ -66,12 +66,32 @@ class AgoraRTCClient {
   // to happen on a short delay after user-unpublished, so we don't catch
   // the trailing tail of the TTS clip.
   private micUnmuteTimer: ReturnType<typeof setTimeout> | null = null;
+  // Anti-echo mute ONLY runs for the opening greeting. After the agent's
+  // first unpublish, we trust the user's setup (no headphones/mic feedback
+  // reported) and keep the mic always-on so proactive nudges don't get
+  // stuck muted mid-session.
+  private initialGreetingDone = false;
   // How long to wait after the agent stops publishing before we re-enable
   // the mic. Too short → still catches tail audio. Too long → user has to
   // wait noticeably to respond. 400ms is a good middle ground.
   private static readonly MIC_UNMUTE_DELAY_MS = 400;
 
+  // Safety net: if user-unpublished never fires (subscribe error, missed
+  // event, connection hiccup), the mic would be stuck muted forever. This
+  // max-duration timer guarantees we unmute eventually so the user can
+  // always speak again.
+  private static readonly MIC_SAFETY_UNMUTE_MS = 8000;
+  private safetyUnmuteTimer: ReturnType<typeof setTimeout> | null = null;
+
   private muteMicForAgentSpeech(): void {
+    // Only mute during the opening greeting. Once the user has heard the
+    // question and the greeting finishes, we never touch the mute state
+    // from the publish/unpublish handlers again — mic stays hot so the
+    // context loop and proactive nudges don't get stuck muted.
+    if (this.initialGreetingDone) {
+      rlog('[rtc] skip mute — post-greeting, mic stays hot');
+      return;
+    }
     if (this.micUnmuteTimer) {
       clearTimeout(this.micUnmuteTimer);
       this.micUnmuteTimer = null;
@@ -83,11 +103,29 @@ class AgoraRTCClient {
         rlog('[rtc] mic mute error (ignored):', (e as Error).message ?? e);
       }
     }
+    // Arm the safety net each time we mute.
+    if (this.safetyUnmuteTimer) clearTimeout(this.safetyUnmuteTimer);
+    this.safetyUnmuteTimer = setTimeout(() => {
+      this.safetyUnmuteTimer = null;
+      if (this.localAudioTrack) {
+        try {
+          this.localAudioTrack.setEnabled(true);
+          rlog('[rtc] mic safety-unmuted (user-unpublished missed)');
+        } catch (e) {
+          rlog('[rtc] safety unmute error (ignored):', (e as Error).message ?? e);
+        }
+      }
+    }, AgoraRTCClient.MIC_SAFETY_UNMUTE_MS);
   }
 
   private scheduleMicUnmute(): void {
     if (this.micUnmuteTimer) {
       clearTimeout(this.micUnmuteTimer);
+    }
+    // Safety timer is no longer needed — normal unmute path is firing.
+    if (this.safetyUnmuteTimer) {
+      clearTimeout(this.safetyUnmuteTimer);
+      this.safetyUnmuteTimer = null;
     }
     this.micUnmuteTimer = setTimeout(() => {
       this.micUnmuteTimer = null;
@@ -98,6 +136,11 @@ class AgoraRTCClient {
         } catch (e) {
           rlog('[rtc] mic unmute error (ignored):', (e as Error).message ?? e);
         }
+      }
+      // Greeting is done — disable auto-mute for the rest of the session.
+      if (!this.initialGreetingDone) {
+        this.initialGreetingDone = true;
+        rlog('[rtc] greeting complete — mic will stay hot from now on');
       }
     }, AgoraRTCClient.MIC_UNMUTE_DELAY_MS);
   }
