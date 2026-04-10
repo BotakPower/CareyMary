@@ -32,8 +32,6 @@ def flood_transparent_rgba(
         for y in (0, h - 1):
             if seed_predicate(px[x, y][:3]):
                 q.append((x, y))
-        if h > 1:
-            pass
     for y in range(h):
         for x in (0, w - 1):
             if seed_predicate(px[x, y][:3]):
