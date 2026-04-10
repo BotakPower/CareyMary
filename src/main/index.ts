@@ -14,6 +14,7 @@ import {
   CAREYMARY_SYSTEM_PROMPT,
   OLLAMA_ENHANCER_SYSTEM,
   pickCharacterState,
+  pickProactiveUtterance,
 } from '../core/context-engine';
 import {
   broadcastCharacterState,
@@ -28,7 +29,18 @@ const AGORA_ENABLED = (process.env.AGORA_ENABLED ?? 'false').toLowerCase() === '
 const OLLAMA_ENABLED = (process.env.OLLAMA_ENABLED ?? 'false').toLowerCase() === 'true';
 const OLLAMA_URL = process.env.OLLAMA_URL ?? 'http://localhost:11434';
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? 'llama3.1:8b-instruct';
-const CONTEXT_LOOP_MS = 30_000;
+const CONTEXT_LOOP_MS = 10_000;
+// Don't nudge the user twice inside this window — prevents CareyMary from
+// spamming /speak when the distraction streak stays high across multiple ticks.
+const PROACTIVE_COOLDOWN_MS = 25_000;
+// How long the user has to linger on a distraction before CareyMary calls it out.
+// Kept aggressive so the hackathon demo lands: 10s of YouTube triggers the nudge.
+const DISTRACTION_THRESHOLD_SEC = 10;
+// Hard grace window after the agent joins. During this period:
+//   - No /update calls (would interrupt the greeting mid-sentence)
+//   - No proactive /speak calls (would interrupt the goal collection Q&A)
+// Long enough to cover: greeting (~15s) + user response (~15s) + confirmation (~10s).
+const STARTUP_GRACE_MS = 45_000;
 
 // Chromium could not create its on-disk GPU/shader cache (common on Windows with locked profile dirs).
 // Harmless for CareyMary; this avoids noisy console errors. Remove if you rely on that cache for perf.
@@ -52,6 +64,11 @@ let ollamaClient: OllamaClient | null = null;
 let contextLoopHandle: ReturnType<typeof setInterval> | null = null;
 let tickCount = 0;
 let isPaused = false;
+let lastProactiveAt = 0;
+// Wall-clock timestamp of the moment the agent finished joining. Used to
+// enforce STARTUP_GRACE_MS — no updates or proactive speech during the
+// goal-collection Q&A at the start of the session.
+let agentJoinedAt = 0;
 
 function registerOverlayIpcHandlers(): void {
   ipcMain.on('overlay:set-passthrough', (_event, passthrough: unknown) => {
@@ -106,6 +123,7 @@ async function startServices(): Promise<void> {
 
   try {
     await agoraAgent.start(CAREYMARY_SYSTEM_PROMPT);
+    agentJoinedAt = Date.now();
   } catch (err) {
     console.error('[main] AgoraAgent.start failed:', err);
   }
@@ -125,10 +143,26 @@ function startContextLoop(): void {
     const dueReminders = timerManager.getDueReminders();
     const stats = sessionStats.getStats();
 
-    console.log(`[ContextLoop] tick #${tickCount}`);
+    // Hard grace window: during goal collection (greeting + user response +
+    // confirmation) we don't push any /update or /speak, because either of
+    // them can cut the agent off mid-utterance or stomp on the user's reply.
+    // Screen state keeps accumulating so distractionStreak is accurate the
+    // moment grace ends — we just don't act on it yet.
+    const sinceJoin = Date.now() - agentJoinedAt;
+    const inGrace = agentJoinedAt > 0 && sinceJoin < STARTUP_GRACE_MS;
+
+    console.log(`[ContextLoop] tick #${tickCount}${inGrace ? ` (grace, ${Math.round((STARTUP_GRACE_MS - sinceJoin) / 1000)}s left)` : ''}`);
     console.log(
-      `[ContextLoop] app=${screenState.appName} category=${screenState.category} dueReminders=${dueReminders.join(',') || 'none'}`,
+      `[ContextLoop] app=${screenState.appName} category=${screenState.category} distractionStreak=${screenState.distractionStreak}s productiveStreak=${screenState.productiveStreak}s dueReminders=${dueReminders.join(',') || 'none'}`,
     );
+
+    if (inGrace) {
+      // Still update the character sprite so the overlay animates, but skip
+      // everything that talks to Agora.
+      const characterStateInGrace = pickCharacterState(screenState, dueReminders);
+      broadcastCharacterState(overlayWindow, characterStateInGrace);
+      return;
+    }
 
     // Ask the local Ollama co-pilot for a situational directive. Bounded by
     // the client's internal timeout — if Ollama is down or slow, guidance
@@ -158,18 +192,42 @@ function startContextLoop(): void {
       console.error('[ContextLoop] updateContext failed:', err);
     }
 
+    // Proactive speech: decide if CareyMary should say something WITHOUT
+    // waiting for the user to talk first. Uses Agora's /speak endpoint.
+    // Ownership of the cooldown timestamp + reminder acknowledgment lives
+    // here so the picker stays pure.
+    const nudge = pickProactiveUtterance(screenState, dueReminders, {
+      nowMs: Date.now(),
+      lastProactiveAt,
+      cooldownMs: PROACTIVE_COOLDOWN_MS,
+      distractionThresholdSec: DISTRACTION_THRESHOLD_SEC,
+    });
+    if (nudge) {
+      console.log(`[ContextLoop] proactive nudge (${nudge.reason}):`, nudge.text);
+      lastProactiveAt = Date.now();
+      if (nudge.acknowledge) {
+        timerManager.acknowledge(nudge.acknowledge);
+      }
+      try {
+        await agoraAgent.speak(nudge.text);
+      } catch (err) {
+        console.error('[ContextLoop] speak failed:', err);
+      }
+    }
+
     const characterState = pickCharacterState(screenState, dueReminders);
     broadcastCharacterState(overlayWindow, characterState);
   };
 
-  // Delay the first tick so the Agora agent has time to reach "running" state
-  // after /join returns. Calling /update during provisioning errors with
-  // "task is not in a running state and cannot be updated". 5s is a safe
-  // buffer based on observed provisioning times.
-  const INITIAL_TICK_DELAY_MS = 5_000;
+  // Delay the first tick until near the end of the startup grace window.
+  // During grace the tick would no-op anyway (inGrace early-return), so
+  // there's no point burning ticks. 5s buffer before STARTUP_GRACE_MS gives
+  // us one tick during grace for diagnostics, then tick #2 onwards does real
+  // work after grace expires.
+  const INITIAL_TICK_DELAY_MS = Math.max(5_000, STARTUP_GRACE_MS - 5_000);
   setTimeout(() => void tick(), INITIAL_TICK_DELAY_MS);
   contextLoopHandle = setInterval(() => void tick(), CONTEXT_LOOP_MS);
-  console.log('[main] Context loop started (first tick in 5s)');
+  console.log(`[main] Context loop started (first tick in ${INITIAL_TICK_DELAY_MS / 1000}s, grace=${STARTUP_GRACE_MS / 1000}s)`);
 }
 
 /**

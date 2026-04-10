@@ -21,12 +21,16 @@ VOICE STYLE:
 - Don't use bullet points or lists — just talk
 - Match the energy of what's happening — calm for reminders, excited for praise
 
+FIRST INTERACTION (critical):
+- Your very first message MUST ask the user what their goal is for today. Ask warmly, like a mom checking in before they start their day. Example: "Hey love! Before you dive in — what's your main goal for today? Tell me what you're working on."
+- Once the user tells you their goal, confirm it back warmly and commit to helping them stay focused on it. Example: "Got it, sweetie — shipping the React dashboard today. I'll keep an eye on you."
+- Remember their goal for the rest of the session. Reference it when nudging them back from distractions. Example: "Love, YouTube isn't the React dashboard — let's get back to it."
+
 RULES:
-- NEVER interrupt the user if they are in a flow state (productive for 15+ min)
-- Only speak when you have something useful to say
-- When the user talks to you, respond conversationally
-- You can ask about their day, their work, how they're feeling
-- If the user seems stressed, be extra gentle
+- Only speak when you have something useful to say — do not fill silence.
+- When the user talks to you, respond conversationally.
+- You may receive SYSTEM INSTRUCTIONS in the conversation asking you to proactively check in on the user. When that happens, speak the requested message in your own warm voice.
+- If the user seems stressed, be extra gentle.
 
 You will receive real-time context about what the user is doing. Use it naturally.`;
 
@@ -78,6 +82,79 @@ INSTRUCTIONS:
 - Example: "You've been crushing it for an hour! Take a quick stretch, okay?"
 - Example: "Time for some water, sweetie. You've only had 2 glasses today."
 `.trim();
+}
+
+// ---------------------------------------------------------------------------
+// Proactive speech decisions
+// ---------------------------------------------------------------------------
+// CareyMary's voice is normally reactive (user speaks → agent responds). To
+// call out distractions and fire reminders, the main process polls this
+// function each tick and, when it returns a non-null result, POSTs to Agora's
+// `/speak` endpoint to make the agent proactively say the text.
+//
+// The function is pure — the caller owns the cooldown timestamp and the
+// acknowledgment of fired reminders. Keeping it pure makes it easy to unit
+// test and to reason about the nudge-pick priority.
+
+export interface ProactiveContext {
+  nowMs: number;
+  lastProactiveAt: number;
+  cooldownMs: number;
+  /** Distraction streak (seconds) at which we start nudging. */
+  distractionThresholdSec: number;
+}
+
+export interface ProactiveUtterance {
+  text: string;
+  /** If set, caller should acknowledge this reminder after sending. */
+  acknowledge?: ReminderType;
+  reason: 'water' | 'break' | 'stretch' | 'posture' | 'distraction';
+}
+
+export function pickProactiveUtterance(
+  screen: ScreenState,
+  dueReminders: ReminderType[],
+  ctx: ProactiveContext,
+): ProactiveUtterance | null {
+  // Cooldown: never nudge twice within the configured window.
+  if (ctx.nowMs - ctx.lastProactiveAt < ctx.cooldownMs) return null;
+
+  // Health reminders are highest priority — they bubble up regardless of screen state.
+  if (dueReminders.includes('water')) {
+    return {
+      text: "Hey love, quick check-in — grab some water, would you? Just a sip. Stay hydrated for me, sweetie.",
+      acknowledge: 'water',
+      reason: 'water',
+    };
+  }
+  if (dueReminders.includes('stretch')) {
+    return {
+      text: "Sweetie, time for a little stretch. Roll those shoulders back and take a deep breath for me.",
+      acknowledge: 'stretch',
+      reason: 'stretch',
+    };
+  }
+  if (dueReminders.includes('break')) {
+    return {
+      text: "Love, you've been going hard. Stand up and walk around for a minute — your brain will thank you.",
+      acknowledge: 'break',
+      reason: 'break',
+    };
+  }
+
+  // Distraction callout — only once the streak has crossed the threshold.
+  if (
+    screen.category === 'distraction' &&
+    screen.distractionStreak >= ctx.distractionThresholdSec
+  ) {
+    const app = screen.appName || 'that';
+    return {
+      text: `Hey, I see you drifted over to ${app}. That's not the goal, love — let's refocus. What were you working on again?`,
+      reason: 'distraction',
+    };
+  }
+
+  return null;
 }
 
 /** Picks the right character state for a given context, for IPC broadcast. */

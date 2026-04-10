@@ -1,11 +1,14 @@
 import { EventEmitter } from 'events';
 import { TimerConfig, TimerState, ReminderType } from '../types/index';
 
+// Demo-tuned intervals: 30-min hackathon demo needs reminders that fire within
+// the session, not in an hour. For production-grade, pass a custom TimerConfig
+// into the TimerManager constructor.
 const DEFAULT_CONFIG: TimerConfig = {
-  waterIntervalMs: 30 * 60 * 1000,   // 30 min
-  breakIntervalMs: 45 * 60 * 1000,   // 45 min
-  postureCheckMs:  20 * 60 * 1000,   // 20 min
-  stretchIntervalMs: 60 * 60 * 1000, // 60 min
+  waterIntervalMs:   2 * 60 * 1000,   // 2 min
+  stretchIntervalMs: 4 * 60 * 1000,   // 4 min
+  breakIntervalMs:   6 * 60 * 1000,   // 6 min
+  postureCheckMs:    5 * 60 * 1000,   // 5 min
 };
 
 export class TimerManager extends EventEmitter {
