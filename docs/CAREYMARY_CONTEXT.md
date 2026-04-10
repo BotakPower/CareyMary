@@ -795,23 +795,23 @@ Work is split across 4 developers. Edmund (Dev 1) takes the heaviest, most integ
 
 ```bash
 # Branch naming
-main                    # always working; scaffold lives here from T+0
+uat                     # active baseline branch; foundation lives here from T+0 (tagged foundation-v0)
 dev/edmund-agora        # Dev 1 — Agora agent, RTC, context engine, index.ts, IPC
 dev/zhihao-monitors     # Dev 2 — screen-monitor, timer-manager
 dev/simyee-shell        # Dev 3 — overlay-window, tray
 dev/cody-character      # Dev 4 — renderer UI, sprite, styles
 
 # Merge order:
-# 1. Edmund pushes scaffold + shared types directly to main (T+0)
-# 2. simyee-shell     → main  (transparent window baseline)
-# 3. zhihao-monitors  → main  (core logic, independent)
-# 4. cody-character   → main  (visual layer, independent)
-# 5. edmund-agora     → main  (final wiring — Edmund merges everything together in index.ts)
+# 1. Edmund pushes scaffold + shared types directly to uat (T+0, tagged foundation-v0)
+# 2. simyee-shell     → uat  (transparent window baseline)
+# 3. zhihao-monitors  → uat  (core logic, independent)
+# 4. cody-character   → uat  (visual layer, independent)
+# 5. edmund-agora     → uat  (final wiring — Edmund merges everything together in index.ts)
 ```
 
 **Commit convention:** `<type>: <description>` (feat, fix, refactor, docs, chore). Keep commits small so conflicts during the final integration push are trivial.
 
-**Merge protocol:** Everyone rebases on `main` before pushing their branch. Edmund has merge authority on `main` during integration (T+3:30 onward) to avoid race conditions.
+**Merge protocol:** Everyone rebases on `uat` before pushing their branch. Edmund has merge authority on `uat` during integration (T+3:30 onward) to avoid race conditions. All devs branch from tag `foundation-v0`, not from floating `uat` HEAD, to avoid picking up in-progress work mid-branch.
 
 ---
 

@@ -1,0 +1,25 @@
+{
+  "name": "careymary",
+  "version": "0.1.0",
+  "description": "Desktop productivity companion for people with ADHD",
+  "main": "dist/main/index.js",
+  "scripts": {
+    "build": "tsc && node -e \"const fs=require('fs'),path=require('path');const src=path.join('src','renderer');const dst=path.join('dist','renderer');fs.mkdirSync(dst,{recursive:true});for(const f of fs.readdirSync(src)){if(f.endsWith('.html')||f.endsWith('.css'))fs.copyFileSync(path.join(src,f),path.join(dst,f));}\"",
+    "start": "npm run build && electron .",
+    "dev": "tsc --watch & electron .",
+    "package:mac": "npm run build && electron-builder --mac",
+    "package:win": "npm run build && electron-builder --win"
+  },
+  "dependencies": {
+    "active-win": "^9.0.0",
+    "agora-rtc-sdk-ng": "^4.23.2",
+    "dotenv": "^16.4.0",
+    "electron-store": "^8.0.0"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0",
+    "typescript": "^5.5.0",
+    "@types/node": "^22.0.0"
+  }
+}
