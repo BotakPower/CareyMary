@@ -57,7 +57,50 @@ function applyCharacterState(el: HTMLElement, state: CharacterState) {
 class AgoraRTCClient {
   private client: any = null;
   private localAudioTrack: any = null;
+  private remoteAudioTrack: any = null;
   private connected = false;
+  // Anti-echo state: when the agent is speaking, we mute the local mic so
+  // the laptop mic doesn't pick up the laptop speakers and feed CareyMary's
+  // own voice back into ASR (which causes her to interrupt herself). We
+  // track this with a handle instead of a flag because we want the unmute
+  // to happen on a short delay after user-unpublished, so we don't catch
+  // the trailing tail of the TTS clip.
+  private micUnmuteTimer: ReturnType<typeof setTimeout> | null = null;
+  // How long to wait after the agent stops publishing before we re-enable
+  // the mic. Too short → still catches tail audio. Too long → user has to
+  // wait noticeably to respond. 400ms is a good middle ground.
+  private static readonly MIC_UNMUTE_DELAY_MS = 400;
+
+  private muteMicForAgentSpeech(): void {
+    if (this.micUnmuteTimer) {
+      clearTimeout(this.micUnmuteTimer);
+      this.micUnmuteTimer = null;
+    }
+    if (this.localAudioTrack) {
+      try {
+        this.localAudioTrack.setEnabled(false);
+      } catch (e) {
+        rlog('[rtc] mic mute error (ignored):', (e as Error).message ?? e);
+      }
+    }
+  }
+
+  private scheduleMicUnmute(): void {
+    if (this.micUnmuteTimer) {
+      clearTimeout(this.micUnmuteTimer);
+    }
+    this.micUnmuteTimer = setTimeout(() => {
+      this.micUnmuteTimer = null;
+      if (this.localAudioTrack) {
+        try {
+          this.localAudioTrack.setEnabled(true);
+          rlog('[rtc] mic re-enabled (agent finished speaking)');
+        } catch (e) {
+          rlog('[rtc] mic unmute error (ignored):', (e as Error).message ?? e);
+        }
+      }
+    }, AgoraRTCClient.MIC_UNMUTE_DELAY_MS);
+  }
 
   async join(params: RTCJoinParams): Promise<void> {
     if (!params.enabled) {
@@ -77,6 +120,10 @@ class AgoraRTCClient {
     this.client.on('user-published', async (user: any, mediaType: string) => {
       rlog('[rtc] user-published uid=', user.uid, 'mediaType=', mediaType);
       if (mediaType !== 'audio') return;
+      // The agent is about to talk — mute our mic synchronously (before we
+      // even subscribe) so there's zero window for our speakers to loop back
+      // into the mic capture.
+      this.muteMicForAgentSpeech();
       try {
         await this.client.subscribe(user, mediaType);
         const track = user.audioTrack;
@@ -84,6 +131,20 @@ class AgoraRTCClient {
           rlog('[rtc] WARN: subscribe resolved without audioTrack for uid', user.uid);
           return;
         }
+        // CRITICAL: Stop the previous remote track before starting a new one.
+        // Minimax TTS chunks speech into segments and the agent republishes
+        // its audio track between segments. Without this stop, each republish
+        // stacks a new playing track on top of the old one → overlapping
+        // playback → choppy / doubled audio. Stop-then-play keeps the stream
+        // monophonic and clean.
+        if (this.remoteAudioTrack && this.remoteAudioTrack !== track) {
+          try {
+            this.remoteAudioTrack.stop();
+          } catch (e) {
+            rlog('[rtc] remote track stop error (ignored):', (e as Error).message ?? e);
+          }
+        }
+        this.remoteAudioTrack = track;
         track.play();
         rlog('[rtc] remote audio playing from uid', user.uid);
       } catch (err) {
@@ -93,6 +154,22 @@ class AgoraRTCClient {
 
     this.client.on('user-unpublished', (user: any, mediaType: string) => {
       rlog('[rtc] user-unpublished uid=', user.uid, 'mediaType=', mediaType);
+      if (mediaType !== 'audio') return;
+      // Stop the playing remote track as soon as the agent stops publishing.
+      // Agora's SDK will hand us a fresh track on the next user-published
+      // event — we don't want the old one lingering and overlapping.
+      if (this.remoteAudioTrack) {
+        try {
+          this.remoteAudioTrack.stop();
+        } catch (e) {
+          rlog('[rtc] remote track stop error (ignored):', (e as Error).message ?? e);
+        }
+        this.remoteAudioTrack = null;
+      }
+      // Agent stopped speaking — re-enable the mic on a short delay so we
+      // don't catch the trailing tail of the TTS clip still echoing out of
+      // the laptop speakers.
+      this.scheduleMicUnmute();
     });
 
     this.client.on('user-left', (user: any) => {
@@ -134,6 +211,17 @@ class AgoraRTCClient {
     } catch (err) {
       rlog('[rtc] ERROR: publish failed:', (err as Error).message ?? err);
       throw err;
+    }
+
+    // Start muted — the greeting is about to play through the laptop
+    // speakers and we don't want the mic to loop it back before the first
+    // user-published event fires. The user-unpublished handler after the
+    // greeting will unmute automatically.
+    try {
+      this.localAudioTrack.setEnabled(false);
+      rlog('[rtc] mic starts muted (will unmute after greeting)');
+    } catch (e) {
+      rlog('[rtc] initial mic mute error (ignored):', (e as Error).message ?? e);
     }
 
     this.connected = true;

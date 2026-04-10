@@ -128,8 +128,12 @@ export class AgoraAgent {
         asr: { params: { language: 'en' } },
         llm: {
           system_messages: [{ role: 'system', content: systemPrompt }],
-          greeting_message:
-            "Hey love! I'm CareyMary, your desktop buddy. Before you dive in — what's your main goal for today? Tell me what you're working on and I'll help you stay focused on it.",
+          // Intentionally minimal — this is agent-managed speech that can
+          // be interrupted by mic noise. The REAL first utterance (the goal
+          // question) is delivered via an explicit /speak call with
+          // `interruptable: false`, which Agora's server enforces so noise
+          // cannot cut it off. See startServices() in src/main/index.ts.
+          greeting_message: 'Hi love.',
           failure_message: "Hmm, I didn't catch that. Say it again for me?",
           max_history: 20,
         },
