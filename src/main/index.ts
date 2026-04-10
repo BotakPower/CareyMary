@@ -7,6 +7,7 @@ import { ScreenMonitor } from '../core/screen-monitor';
 import { TimerManager } from '../core/timer-manager';
 import { SessionStatsTracker } from '../core/session-stats';
 import { AgoraAgent } from '../core/agora-agent';
+import { OllamaClient } from '../core/ollama-client';
 import {
   CAREYMARY_SYSTEM_PROMPT,
   pickCharacterState,
@@ -22,18 +23,21 @@ import {
 dotenv.config({ path: path.join(__dirname, '..', '..', '.env') });
 
 const AGORA_ENABLED = (process.env.AGORA_ENABLED ?? 'false').toLowerCase() === 'true';
-const CONTEXT_LOOP_MS = 10_000;
-// Don't nudge the user twice inside this window — prevents CareyMary from
-// spamming /speak when the distraction streak stays high across multiple ticks.
-const PROACTIVE_COOLDOWN_MS = 25_000;
-// How long the user has to linger on a distraction before CareyMary calls it out.
-// Kept aggressive so the hackathon demo lands: 10s of YouTube triggers the nudge.
+const OLLAMA_ENABLED = (process.env.OLLAMA_ENABLED ?? 'true').toLowerCase() === 'true';
+const OLLAMA_URL = process.env.OLLAMA_URL ?? 'http://localhost:11434';
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? 'llama3.1:8b-instruct';
+const CONTEXT_LOOP_MS = 2_000;
+// Don't nudge the user twice inside this window. Short so water can fire
+// shortly after the distraction callout in the demo flow.
+const PROACTIVE_COOLDOWN_MS = 8_000;
+// 10s lingering on a distraction triggers the callout.
 const DISTRACTION_THRESHOLD_SEC = 10;
-// Hard grace window after the agent joins. During this period:
-//   - No /update calls (would interrupt the greeting mid-sentence)
-//   - No proactive /speak calls (would interrupt the goal collection Q&A)
-// Long enough to cover: greeting (~15s) + user response (~15s) + confirmation (~10s).
-const STARTUP_GRACE_MS = 45_000;
+// Hard grace window after the agent joins — blocks /speak so the opening
+// Q&A isn't cut off. The renderer separately kills the mic after the 2nd
+// agent utterance (the "got it" acknowledgement), which is the real end
+// of the listening phase; this grace is just belt-and-suspenders for
+// /speak timing in case the user takes a while to answer.
+const STARTUP_GRACE_MS = 30_000;
 
 // Chromium could not create its on-disk GPU/shader cache (common on Windows with locked profile dirs).
 // Harmless for CareyMary; this avoids noisy console errors. Remove if you rely on that cache for perf.
@@ -53,19 +57,20 @@ let screenMonitor: ScreenMonitor | null = null;
 let timerManager: TimerManager | null = null;
 let sessionStats: SessionStatsTracker | null = null;
 let agoraAgent: AgoraAgent | null = null;
+let ollamaClient: OllamaClient | null = null;
 let contextLoopHandle: ReturnType<typeof setInterval> | null = null;
 let tickCount = 0;
 let isPaused = false;
 let lastProactiveAt = 0;
+// Captured once from the user's first ASR transcript, after Ollama condenses
+// it to a short phrase like "the hackathon app". Used to personalize the
+// distraction + water nudge text. Null until the first transcript arrives.
+let goalPhrase: string | null = null;
+let goalCaptureInFlight = false;
 // Wall-clock timestamp of the moment the agent finished joining. Used to
-// enforce STARTUP_GRACE_MS — no updates or proactive speech during the
-// goal-collection Q&A at the start of the session.
+// enforce STARTUP_GRACE_MS — no proactive /speak during the goal-collection
+// Q&A at the start of the session.
 let agentJoinedAt = 0;
-// Once we cut the mic after grace, we never turn it back on — CareyMary
-// should ONLY speak scripted /speak nudges (water + distraction), never
-// respond conversationally. This flag makes sure we only send the mic-off
-// IPC once instead of every tick.
-let micCutAfterGrace = false;
 
 function registerOverlayIpcHandlers(): void {
   ipcMain.on('overlay:set-passthrough', (_event, passthrough: unknown) => {
@@ -107,12 +112,83 @@ async function startServices(): Promise<void> {
 
   console.log(`[main] AgoraAgent initialized (enabled=${AGORA_ENABLED})`);
 
+  ollamaClient = new OllamaClient({
+    url: OLLAMA_URL,
+    model: OLLAMA_MODEL,
+    enabled: OLLAMA_ENABLED,
+    timeoutMs: 4000,
+    maxTokens: 32,
+    temperature: 0.2,
+  });
+  console.log(
+    `[main] OllamaClient initialized (enabled=${OLLAMA_ENABLED}, url=${OLLAMA_URL}, model=${OLLAMA_MODEL})`,
+  );
+
   try {
     await agoraAgent.start(CAREYMARY_SYSTEM_PROMPT);
     agentJoinedAt = Date.now();
   } catch (err) {
     console.error('[main] AgoraAgent.start failed:', err);
   }
+}
+
+// Extract a short 2-5 word goal phrase from the user's raw ASR transcript.
+// Used to personalize later nudge text. Runs through local Ollama so it stays
+// offline and private. On any failure (Ollama down, timeout, empty output)
+// we fall back to a naive heuristic so the demo still reads naturally.
+const GOAL_EXTRACTOR_SYSTEM = `You extract short goal phrases from voice transcripts.
+
+The user just answered the question "What are you working on today?" Your job is to produce a 2-5 word noun phrase describing their project.
+
+RULES:
+- Output ONLY the phrase. No punctuation, no quotes, no preamble.
+- Use natural English that fits after "get back to ___" or "working on ___".
+- Examples:
+  - "I'm working on the hackathon app" → the hackathon app
+  - "coding my Electron project" → your coding
+  - "writing dissertation chapter three" → your dissertation chapter
+  - "doing some Leetcode" → your Leetcode
+- If the transcript is unclear, output exactly: your work`;
+
+function heuristicGoalPhrase(raw: string): string {
+  // Strip common filler prefixes so "I'm working on X" becomes "X".
+  const cleaned = raw
+    .toLowerCase()
+    .replace(/^(um+|uh+|okay|ok|so|well|hey|hi|hello)[,\s]+/g, '')
+    .replace(/^i(?:'m| am)\s+(?:currently\s+)?(?:working on|doing|writing|building|making|coding)\s+/, '')
+    .replace(/^(?:working on|doing|writing|building|making)\s+/, '')
+    .replace(/[.!?]+$/, '')
+    .trim();
+  const words = cleaned.split(/\s+/).filter(Boolean).slice(0, 5);
+  return words.length > 0 ? words.join(' ') : 'your work';
+}
+
+async function captureGoalFromTranscript(text: string): Promise<void> {
+  // Only capture the first transcript. Subsequent transcripts (if the mic
+  // ever reopens) don't overwrite the goal.
+  if (goalPhrase !== null || goalCaptureInFlight) {
+    console.log('[main] goal already captured, ignoring transcript');
+    return;
+  }
+  goalCaptureInFlight = true;
+  console.log('[main] capturing goal from transcript:', text.slice(0, 200));
+
+  let phrase: string | null = null;
+  if (ollamaClient?.isEnabled()) {
+    phrase = await ollamaClient.generate(GOAL_EXTRACTOR_SYSTEM, text);
+    if (phrase) {
+      // Ollama sometimes wraps in quotes or adds trailing punctuation.
+      phrase = phrase.replace(/^["'`]|["'`]$/g, '').replace(/[.!?]+$/, '').trim();
+    }
+  }
+  if (!phrase || phrase.length === 0 || phrase.length > 60) {
+    phrase = heuristicGoalPhrase(text);
+    console.log('[main] ollama unavailable/bad output — heuristic goal:', phrase);
+  } else {
+    console.log('[main] ollama extracted goal:', phrase);
+  }
+  goalPhrase = phrase;
+  goalCaptureInFlight = false;
 }
 
 function startContextLoop(): void {
@@ -148,16 +224,8 @@ function startContextLoop(): void {
       return;
     }
 
-    // First tick AFTER the grace window: cut the mic permanently. CareyMary
-    // only speaks scripted /speak nudges from here on — no ASR listening,
-    // no conversational responses like "you're so sweet". The user already
-    // told us their goal during the grace window; we don't need the mic
-    // again for the rest of the session.
-    if (!micCutAfterGrace) {
-      micCutAfterGrace = true;
-      console.log('[ContextLoop] grace window over — muting mic permanently (scripted nudges only)');
-      requestSetMicEnabled(overlayWindow, false);
-    }
+    // Mic is already killed by the renderer after the 2nd agent utterance
+    // (the "got it" acknowledgement). We don't touch the mic from main here.
 
     // No continuous /update calls — the system prompt tells CareyMary to
     // stay silent by default, and pushing context every 10s was making the
@@ -167,14 +235,17 @@ function startContextLoop(): void {
     // waiting for the user to talk first. Uses Agora's /speak endpoint.
     // Ownership of the cooldown timestamp + reminder acknowledgment lives
     // here so the picker stays pure.
+    const nowMs = Date.now();
+    const cooldownLeft = Math.max(0, PROACTIVE_COOLDOWN_MS - (nowMs - lastProactiveAt));
     const nudge = pickProactiveUtterance(screenState, dueReminders, {
-      nowMs: Date.now(),
+      nowMs,
       lastProactiveAt,
       cooldownMs: PROACTIVE_COOLDOWN_MS,
       distractionThresholdSec: DISTRACTION_THRESHOLD_SEC,
+      goalPhrase: goalPhrase ?? undefined,
     });
     if (nudge) {
-      console.log(`[ContextLoop] proactive nudge (${nudge.reason}):`, nudge.text);
+      console.log(`[ContextLoop] FIRING proactive nudge (${nudge.reason}):`, nudge.text);
       lastProactiveAt = Date.now();
       if (nudge.acknowledge) {
         timerManager.acknowledge(nudge.acknowledge);
@@ -183,6 +254,22 @@ function startContextLoop(): void {
         await agoraAgent.speak(nudge.text);
       } catch (err) {
         console.error('[ContextLoop] speak failed:', err);
+      }
+    } else {
+      // Explain exactly why nothing fired so we can debug silent ticks.
+      const reasons: string[] = [];
+      if (cooldownLeft > 0) reasons.push(`cooldown ${Math.round(cooldownLeft / 1000)}s left`);
+      if (!dueReminders.includes('water') && screenState.category !== 'distraction') {
+        reasons.push(`not distraction (category=${screenState.category})`);
+      }
+      if (
+        screenState.category === 'distraction' &&
+        screenState.distractionStreak < DISTRACTION_THRESHOLD_SEC
+      ) {
+        reasons.push(`streak ${screenState.distractionStreak}s < ${DISTRACTION_THRESHOLD_SEC}s threshold`);
+      }
+      if (reasons.length > 0) {
+        console.log(`[ContextLoop] no nudge: ${reasons.join('; ')}`);
       }
     }
 
@@ -258,9 +345,14 @@ app.whenReady().then(async () => {
 
   overlayWindow = createOverlayWindow();
 
-  registerMainListeners(() => {
-    kickRTCOnReady();
-  });
+  registerMainListeners(
+    () => {
+      kickRTCOnReady();
+    },
+    (text: string) => {
+      void captureGoalFromTranscript(text);
+    },
+  );
 
   registerTrayListeners();
 

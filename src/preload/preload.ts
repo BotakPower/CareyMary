@@ -9,6 +9,7 @@ const CHANNELS = {
   setMicEnabled: 'set-mic-enabled',
   rendererReady: 'renderer-ready',
   rendererLog: 'renderer-log',
+  userTranscript: 'user-transcript',
 } as const;
 
 const api: CareyMaryAPI = {
@@ -35,6 +36,9 @@ const api: CareyMaryAPI = {
   },
   logToMain: (message: string) => {
     ipcRenderer.send(CHANNELS.rendererLog, message);
+  },
+  sendUserTranscript: (text: string) => {
+    ipcRenderer.send(CHANNELS.userTranscript, text);
   },
 };
 

@@ -82,7 +82,7 @@ export class ScreenMonitor extends EventEmitter {
   private lastTickTime: number = Date.now();
   private readonly pollIntervalMs: number;
 
-  constructor(pollIntervalMs = 5000) {
+  constructor(pollIntervalMs = 2000) {
     super();
     this.pollIntervalMs = pollIntervalMs;
   }

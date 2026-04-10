@@ -22,6 +22,7 @@ interface CareyMaryAPI {
   setOverlayPassthrough: (passthrough: boolean) => void;
   quitCareyMary: () => void;
   logToMain: (message: string) => void;
+  sendUserTranscript: (text: string) => void;
 }
 
 // Global log helper — forwards to main process terminal AND DevTools console.
@@ -66,15 +67,24 @@ class AgoraRTCClient {
   // to happen on a short delay after user-unpublished, so we don't catch
   // the trailing tail of the TTS clip.
   private micUnmuteTimer: ReturnType<typeof setTimeout> | null = null;
-  // Anti-echo mute ONLY runs for the opening greeting. After the agent's
-  // first unpublish, we trust the user's setup (no headphones/mic feedback
-  // reported) and keep the mic always-on so proactive nudges don't get
-  // stuck muted mid-session.
-  private initialGreetingDone = false;
+  // CareyMary only listens long enough to hear the user's goal. Flow:
+  //   Turn 1: Agent says "What are you working on today?"
+  //   Turn 2: User answers (captured via stream-message user transcription)
+  //   Turn 3: Agent acknowledges "I see, let's work on..."
+  //   After the agent finishes turn 3 the mic is permanently disabled.
+  //
+  // We track turn completion via the Conversational AI stream-message
+  // events (object="message.state", state="silent", turn_id=N) NOT via
+  // RTC publish/unpublish events. Minimax TTS chunks a single utterance
+  // into multiple publish cycles, so publish counting is unreliable —
+  // counting `state=silent` keyed by turn_id is the correct boundary.
+  private lastAgentTurnSilent = 0;
+  private micPermanentlyOff = false;
   // How long to wait after the agent stops publishing before we re-enable
-  // the mic. Too short → still catches tail audio. Too long → user has to
-  // wait noticeably to respond. 400ms is a good middle ground.
-  private static readonly MIC_UNMUTE_DELAY_MS = 400;
+  // the mic. Short so we don't clip the user's opening words when they
+  // answer the goal question. 80ms is fast enough that a late start on
+  // "I'm working on X" still captures the "I" cleanly.
+  private static readonly MIC_UNMUTE_DELAY_MS = 80;
 
   // Safety net: if user-unpublished never fires (subscribe error, missed
   // event, connection hiccup), the mic would be stuck muted forever. This
@@ -84,14 +94,9 @@ class AgoraRTCClient {
   private safetyUnmuteTimer: ReturnType<typeof setTimeout> | null = null;
 
   private muteMicForAgentSpeech(): void {
-    // Only mute during the opening greeting. Once the user has heard the
-    // question and the greeting finishes, we never touch the mute state
-    // from the publish/unpublish handlers again — mic stays hot so the
-    // context loop and proactive nudges don't get stuck muted.
-    if (this.initialGreetingDone) {
-      rlog('[rtc] skip mute — post-greeting, mic stays hot');
-      return;
-    }
+    // Permanent off wins — never reach for the mic again once CareyMary
+    // has stopped listening.
+    if (this.micPermanentlyOff) return;
     if (this.micUnmuteTimer) {
       clearTimeout(this.micUnmuteTimer);
       this.micUnmuteTimer = null;
@@ -119,16 +124,17 @@ class AgoraRTCClient {
   }
 
   private scheduleMicUnmute(): void {
+    if (this.micPermanentlyOff) return;
     if (this.micUnmuteTimer) {
       clearTimeout(this.micUnmuteTimer);
     }
-    // Safety timer is no longer needed — normal unmute path is firing.
     if (this.safetyUnmuteTimer) {
       clearTimeout(this.safetyUnmuteTimer);
       this.safetyUnmuteTimer = null;
     }
     this.micUnmuteTimer = setTimeout(() => {
       this.micUnmuteTimer = null;
+      if (this.micPermanentlyOff) return;
       if (this.localAudioTrack) {
         try {
           this.localAudioTrack.setEnabled(true);
@@ -137,12 +143,168 @@ class AgoraRTCClient {
           rlog('[rtc] mic unmute error (ignored):', (e as Error).message ?? e);
         }
       }
-      // Greeting is done — disable auto-mute for the rest of the session.
-      if (!this.initialGreetingDone) {
-        this.initialGreetingDone = true;
-        rlog('[rtc] greeting complete — mic will stay hot from now on');
-      }
     }, AgoraRTCClient.MIC_UNMUTE_DELAY_MS);
+  }
+
+  private killMicPermanently(reason: string): void {
+    if (this.micPermanentlyOff) return;
+    this.micPermanentlyOff = true;
+    if (this.micUnmuteTimer) {
+      clearTimeout(this.micUnmuteTimer);
+      this.micUnmuteTimer = null;
+    }
+    if (this.safetyUnmuteTimer) {
+      clearTimeout(this.safetyUnmuteTimer);
+      this.safetyUnmuteTimer = null;
+    }
+    if (this.localAudioTrack) {
+      try {
+        this.localAudioTrack.setEnabled(false);
+        rlog('[rtc] mic PERMANENTLY OFF —', reason);
+      } catch (e) {
+        rlog('[rtc] permanent mute error (ignored):', (e as Error).message ?? e);
+      }
+    }
+  }
+
+  // ---- Stream-message decoding + turn tracking ----
+  // Chunks currently being reassembled, keyed by msg_id. Each chunk arrives
+  // as its own stream-message event; we accumulate base64 parts until all
+  // `total` parts are present, then decode + parse the combined payload.
+  private streamChunks = new Map<string, { total: number; parts: string[]; received: number }>();
+  // Dedup: the agent sometimes re-broadcasts completed messages multiple
+  // times (observed in the log). Once we've processed a msg_id we don't
+  // re-process it.
+  private processedMsgIds = new Set<string>();
+
+  private handleStreamMessagePart(payload: Uint8Array): void {
+    let raw = '';
+    try {
+      raw = new TextDecoder().decode(payload);
+    } catch (e) {
+      rlog('[rtc] stream-message decode error:', (e as Error).message ?? e);
+      return;
+    }
+
+    // Framing: "<msg_id>|<chunk_idx>|<total>|<b64>"
+    // The base64 payload itself may contain '=' padding but no '|', so the
+    // first three pipes are always the framing separators.
+    const firstBar = raw.indexOf('|');
+    const secondBar = raw.indexOf('|', firstBar + 1);
+    const thirdBar = raw.indexOf('|', secondBar + 1);
+    if (firstBar < 0 || secondBar < 0 || thirdBar < 0) {
+      rlog('[rtc] stream-message unframed, ignoring:', raw.slice(0, 120));
+      return;
+    }
+    const msgId = raw.slice(0, firstBar);
+    const idx = parseInt(raw.slice(firstBar + 1, secondBar), 10);
+    const total = parseInt(raw.slice(secondBar + 1, thirdBar), 10);
+    const b64 = raw.slice(thirdBar + 1);
+    if (!msgId || !Number.isFinite(idx) || !Number.isFinite(total) || total <= 0) {
+      rlog('[rtc] stream-message bad frame header, ignoring');
+      return;
+    }
+
+    if (this.processedMsgIds.has(msgId)) return;
+
+    let entry = this.streamChunks.get(msgId);
+    if (!entry) {
+      entry = { total, parts: new Array(total).fill(''), received: 0 };
+      this.streamChunks.set(msgId, entry);
+    }
+    // idx is 1-based in Agora's framing
+    const slot = idx - 1;
+    if (slot < 0 || slot >= entry.parts.length) return;
+    if (entry.parts[slot] === '') {
+      entry.parts[slot] = b64;
+      entry.received++;
+    }
+    if (entry.received < entry.total) return;
+
+    // All parts received — assemble + decode
+    this.streamChunks.delete(msgId);
+    this.processedMsgIds.add(msgId);
+    // Bound the dedup set so it doesn't grow forever over a long session.
+    if (this.processedMsgIds.size > 500) {
+      const first = this.processedMsgIds.values().next().value;
+      if (first) this.processedMsgIds.delete(first);
+    }
+
+    const combinedB64 = entry.parts.join('');
+    let jsonText = '';
+    try {
+      jsonText = atob(combinedB64);
+    } catch (e) {
+      rlog('[rtc] base64 decode failed for msg', msgId, (e as Error).message ?? e);
+      return;
+    }
+    let msg: any;
+    try {
+      msg = JSON.parse(jsonText);
+    } catch (e) {
+      rlog('[rtc] JSON parse failed for msg', msgId, ':', jsonText.slice(0, 200));
+      return;
+    }
+
+    this.onAgoraMessage(msg);
+  }
+
+  private onAgoraMessage(msg: any): void {
+    const object: string = msg.object ?? msg.type ?? '';
+    // Terse log — one line per decoded message
+    const preview = typeof msg.text === 'string' ? msg.text.slice(0, 80) : '';
+    rlog(
+      '[rtc] msg',
+      object,
+      'turn=', msg.turn_id ?? '-',
+      'state=', msg.state ?? '-',
+      preview ? 'text=' + JSON.stringify(preview) : '',
+    );
+
+    // Agent turn lifecycle: message.state speaking → silent, keyed by turn_id.
+    // turn_id=0 is the initial idle/silent before the agent starts talking.
+    // turn_id=1 is the greeting ("What are you working on today?"). When
+    // that turn's state flips to 'silent', the greeting is done and the user
+    // should be able to answer — unmute the mic.
+    // turn_id=2 is the agent's acknowledgement ("I see, let's work on...").
+    // When that turn's state flips to 'silent', kill the mic for good.
+    if (
+      object === 'message.state' &&
+      msg.state === 'silent' &&
+      typeof msg.turn_id === 'number' &&
+      msg.turn_id >= 1 &&
+      msg.turn_id > this.lastAgentTurnSilent
+    ) {
+      this.lastAgentTurnSilent = msg.turn_id;
+      rlog('[rtc] agent finished turn', msg.turn_id, '→ acting on it');
+      if (msg.turn_id >= 2) {
+        this.killMicPermanently('agent acknowledgement done (turn 2 silent)');
+      } else {
+        this.scheduleMicUnmute();
+      }
+      return;
+    }
+
+    // User transcription: capture the first final one and forward to main
+    // for Ollama goal extraction. Object name guesses cover known Agora
+    // Conversational AI variants.
+    const isUserTranscription =
+      object === 'user.transcription' ||
+      object === 'user.transcribe' ||
+      (object === 'transcription' && (msg.role === 'user' || msg.speaker === 'user'));
+    if (isUserTranscription) {
+      const text: string = typeof msg.text === 'string' ? msg.text : '';
+      const isFinal: boolean =
+        msg.final === true ||
+        msg.is_final === true ||
+        msg.final_text === true ||
+        msg.turn_status === 2;
+      if (text && isFinal) {
+        rlog('[rtc] USER TRANSCRIPT (final):', text);
+        const bridge = (window as Window & { careymary?: CareyMaryAPI }).careymary;
+        bridge?.sendUserTranscript?.(text);
+      }
+    }
   }
 
   async join(params: RTCJoinParams): Promise<void> {
@@ -209,10 +371,11 @@ class AgoraRTCClient {
         }
         this.remoteAudioTrack = null;
       }
-      // Agent stopped speaking — re-enable the mic on a short delay so we
-      // don't catch the trailing tail of the TTS clip still echoing out of
-      // the laptop speakers.
-      this.scheduleMicUnmute();
+      // NOTE: we intentionally do NOT count unpublish events to decide
+      // mic state. Minimax TTS chunks one utterance into multiple publish
+      // cycles, so publish counting races the real turn boundaries.
+      // Mic state is driven by message.state → silent events, handled
+      // inside handleStreamMessagePart().
     });
 
     this.client.on('user-left', (user: any) => {
@@ -221,6 +384,17 @@ class AgoraRTCClient {
 
     this.client.on('connection-state-change', (cur: string, prev: string) => {
       rlog('[rtc] connection-state-change', prev, '->', cur);
+    });
+
+    // Agora Conversational AI sends ASR + lifecycle events as chunked data
+    // messages. Framing (empirically verified):
+    //   "<msg_id>|<chunk_idx>|<total_chunks>|<base64-json>"
+    // e.g. "7ae7f82a|1|3|eyJvYmplY3Q..." is part 1 of 3 for msg 7ae7f82a.
+    // We reassemble by msg_id, base64-decode, JSON-parse. Then we inspect
+    // the `object` field: message.state drives turn tracking, and
+    // user.transcription (with final=true) is the captured goal.
+    this.client.on('stream-message', (_uid: any, payload: Uint8Array) => {
+      this.handleStreamMessagePart(payload);
     });
 
     try {

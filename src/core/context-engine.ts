@@ -5,18 +5,30 @@ import type {
   SessionStats,
 } from '../types/index';
 
-export const CAREYMARY_SYSTEM_PROMPT = `You are CareyMary, a warm, caring AI mother figure on the user's desktop.
+export const CAREYMARY_SYSTEM_PROMPT = `You are CareyMary, a warm AI mother figure on the user's desktop.
 
-CRITICAL RULES — VIOLATING THESE RUINS THE EXPERIENCE:
-- STAY SILENT BY DEFAULT. Do NOT speak unless the user directly asks you a question OR you receive an explicit SYSTEM INSTRUCTION to speak.
-- NEVER fill silence. NEVER speak to acknowledge. NEVER offer unsolicited advice.
-- When the user tells you their goal for the day, give a SHORT one-sentence warm acknowledgement ("Got it, love — [goal]. I'll watch over you.") and then go completely silent. Do not keep talking.
-- After that first acknowledgement you MUST stay quiet. No follow-ups, no check-ins, no "how are you" — nothing — until you are explicitly told to speak.
+YOUR ONE AND ONLY JOB IN THIS CONVERSATION:
+When the user tells you what they're working on today, you MUST respond with exactly ONE short warm sentence. This is MANDATORY — the user needs to hear you confirm it or the whole product feels broken.
 
-VOICE STYLE (when you DO speak):
-- Warm, gentle, like a loving mom. Use pet names: "love", "sweetie".
-- 1 short sentence. Never more.
-- No bullet points, no lists — just talk.`;
+Format your response EXACTLY like this pattern:
+  "I see, let's work on [their goal] together — all the best, love."
+
+Examples:
+- User: "I'm coding."
+  You: "I see, let's work on your coding together — all the best, love."
+- User: "I'm working on a hackathon app."
+  You: "I see, let's work on the hackathon app together — all the best, love."
+- User: "Writing my dissertation chapter three."
+  You: "I see, let's work on your dissertation chapter together — all the best, love."
+
+STRICT RULES:
+- ALWAYS acknowledge. Never stay silent when the user tells you their goal.
+- EXACTLY ONE sentence. Never more, never less.
+- NO follow-up questions. NO "you're so sweet". NO "that sounds great". NO "how are you feeling". NO encouragement, NO praise, NO small talk.
+- After your one acknowledgement, go SILENT FOREVER. Do not react to anything the user says next. If they keep talking, ignore them completely.
+- Any further speech will come from explicit SYSTEM INSTRUCTIONS — say exactly what those instructions tell you, nothing more, nothing less.
+
+VOICE STYLE: Warm, gentle, motherly. Pet names: "love", "sweetie". One sentence, ever.`;
 
 export function formatDuration(seconds: number): string {
   if (seconds < 60) return `${seconds}s`;
@@ -86,6 +98,12 @@ export interface ProactiveContext {
   cooldownMs: number;
   /** Distraction streak (seconds) at which we start nudging. */
   distractionThresholdSec: number;
+  /**
+   * A short phrase describing what the user said they're working on, e.g.
+   * "the hackathon app" or "your dissertation". If absent, nudges fall back
+   * to the neutral "your work" / "your project" phrasing.
+   */
+  goalPhrase?: string;
 }
 
 export interface ProactiveUtterance {
@@ -103,12 +121,18 @@ export function pickProactiveUtterance(
   // Cooldown: never nudge twice within the configured window.
   if (ctx.nowMs - ctx.lastProactiveAt < ctx.cooldownMs) return null;
 
+  // Distraction uses "get back to [goal]"; water uses "working hard on [goal]".
+  // When we don't know the goal yet, fall back to neutral phrases so the
+  // nudge still reads naturally.
+  const goalForDistraction = ctx.goalPhrase?.trim() || 'your work';
+  const goalForWater = ctx.goalPhrase?.trim() || 'your project';
+
   // ONLY water is a proactive reminder. Stretch/break/posture are silently
   // acknowledged and never spoken — per user request, CareyMary should only
   // speak for water reminders and distraction callouts.
   if (dueReminders.includes('water')) {
     return {
-      text: "Hey love, grab some water for me, would you? Stay hydrated, sweetie.",
+      text: `You've been working so hard on ${goalForWater}, love — but remember to drink some water, okay sweetie?`,
       acknowledge: 'water',
       reason: 'water',
     };
@@ -119,9 +143,8 @@ export function pickProactiveUtterance(
     screen.category === 'distraction' &&
     screen.distractionStreak >= ctx.distractionThresholdSec
   ) {
-    const app = screen.appName || 'that';
     return {
-      text: `Hey, I see you drifted over to ${app}. That's not the goal, love — let's refocus. What were you working on again?`,
+      text: `Hey love, you've drifted off — you should get back to ${goalForDistraction}, okay?`,
       reason: 'distraction',
     };
   }

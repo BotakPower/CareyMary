@@ -59,4 +59,6 @@ export interface CareyMaryAPI {
   quitCareyMary: () => void;
   /** Forward a renderer log line to the main process terminal. */
   logToMain: (message: string) => void;
+  /** Forward a captured ASR transcript of the user's speech to main. */
+  sendUserTranscript: (text: string) => void;
 }
