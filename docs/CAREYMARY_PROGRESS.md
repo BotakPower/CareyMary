@@ -14,14 +14,14 @@
 | Module | Owner | Status | File(s) |
 |---|---|---|---|
 | Foundation (Electron + types + scaffold) | Edmund | ✅ shipped (tag `foundation-v0`) | `src/main/`, `src/preload/`, `src/renderer/`, `src/types/`, `package.json`, `tsconfig.json` |
-| Screen monitor | ZhiHao | ✅ shipped | `src/core/screen-monitor.ts` |
+| Screen monitor | ZhiHao + Edmund | ✅ shipped (active-win → get-windows swap by Edmund for Electron ABI compat) | `src/core/screen-monitor.ts` |
 | Timer manager | ZhiHao | ✅ shipped | `src/core/timer-manager.ts` |
-| Context engine | Edmund | 🟡 in progress | `src/core/context-engine.ts` |
-| Session stats | Edmund | 🟡 in progress | `src/core/session-stats.ts` |
-| Agora ConvoAI agent | Edmund | 🟡 in progress | `src/core/agora-agent.ts` |
-| Agora RTC client | Edmund | 🟡 in progress | `src/core/agora-rtc.ts` |
-| IPC wiring + main loop | Edmund | 🟡 in progress | `src/main/ipc-handlers.ts`, `src/preload/preload.ts`, `src/main/index.ts` |
-| RTC test harness | Edmund | 🟡 in progress | `test-harness/rtc-test.html` |
+| Context engine | Edmund | ✅ shipped | `src/core/context-engine.ts` |
+| Session stats | Edmund | ✅ shipped | `src/core/session-stats.ts` |
+| Agora ConvoAI agent | Edmund | ✅ shipped (dry-run) | `src/core/agora-agent.ts` |
+| Agora RTC client | Edmund | ✅ shipped (dry-run) | `src/core/agora-rtc.ts` |
+| IPC wiring + main loop | Edmund | ✅ shipped | `src/main/ipc-handlers.ts`, `src/preload/preload.ts`, `src/main/index.ts` |
+| RTC test harness | Edmund | ✅ shipped | `test-harness/rtc-test.html` |
 | System tray | SimYee | ⬜ not started | `src/main/tray.ts` |
 | Character sprite UI | Cody | ⬜ not started | `src/renderer/overlay.ts`, `src/renderer/styles.css`, `assets/careymary-sprite.png` |
 | Real Agora credentials | ZhiHao | ⬜ not started | `.env` |
@@ -40,11 +40,17 @@
 - `TimerManager` — water/break/posture/stretch reminders, acknowledge API, `'reminder'` events
 - Tests: `tests/screen-monitor.test.ts`, `tests/timer-manager.test.ts`
 
-### 2026-04-10 — Dev 1 Agora + Context (Edmund) — IN PROGRESS
-- Expanding `CareyMaryAPI` preload contract with RTC control channels
-- Adding `AGORA_ENABLED` dry-run flag
-- Building: context-engine, session-stats, agora-agent (REST), agora-rtc (renderer SDK wrapper), ipc-handlers, preload expansion, main process wiring, RTC test harness
-- Default mode: dry-run (`AGORA_ENABLED=false`) — app boots + context loop logs prompts without real credentials
+### 2026-04-10 — Dev 1 Agora + Context (Edmund) — SHIPPED
+- Expanded `CareyMaryAPI` preload contract with RTC control channels (`onStartRTC`, `onStopRTC`, `onSetMicEnabled`, `notifyRendererReady`)
+- `AGORA_ENABLED` dry-run flag — app boots + context loop logs prompts without real credentials
+- Shipped: context-engine, session-stats, agora-agent (REST), agora-rtc (renderer SDK wrapper), ipc-handlers, main process wiring, RTC test harness
+- Context loop: 30s tick builds prompt from ScreenMonitor + TimerManager + SessionStats, pushes to AgoraAgent, broadcasts character-state to overlay
+- **Screen monitor swap:** active-win's native N-API binary wouldn't self-register under Electron 33's ABI even after `electron-rebuild`; swapped to `get-windows` (maintained successor, uses a spawned Swift binary — no N-API rebuild needed). macOS grants screen recording permission on first run.
+- Smoke test ✅: `app=Warp category=productive`, zero errors, DRY RUN logs fire every 30s
+
+### 2026-04-10 — Dev 2 Real Agora Credentials (ZhiHao) — NOT STARTED
+- Fill `.env` with `AGORA_APP_ID`, `AGORA_CUSTOMER_ID`, `AGORA_CUSTOMER_SECRET`, `AGORA_RTC_TOKEN`
+- Flip `AGORA_ENABLED=true` and verify end-to-end voice loop
 
 ---
 
@@ -72,7 +78,7 @@ npm start
 
 1. ✅ T+0: Edmund foundation (`foundation-v0` tag)
 2. ✅ T+0: ZhiHao monitors (merged into `ZM`)
-3. 🟡 T+3:30: Edmund Agora + context + wiring (this lane) → merges to `uat`
+3. ✅ T+3:30: Edmund Agora + context + wiring (on `ZM`, ready for `uat` merge)
 4. ⬜ T+?: SimYee tray → merges to `uat`
 5. ⬜ T+?: Cody character sprite → merges to `uat`
 6. ⬜ T+5:00: Demo rehearsal + bug bash
