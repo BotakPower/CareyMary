@@ -120,6 +120,7 @@ export class AgoraAgent {
         const body = await res.text();
         throw new Error(`Agora /update failed: ${res.status} ${body}`);
       }
+      console.log('[AgoraAgent] context updated, prompt length=', newSystemPrompt.length);
     } catch (err) {
       console.error('[AgoraAgent] updateContext error:', err);
     }
