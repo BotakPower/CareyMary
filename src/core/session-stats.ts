@@ -1,15 +1,23 @@
 import type { ScreenMonitor } from './screen-monitor';
-import type { SessionStats, ScreenState } from '../types/index';
+import type { SessionStats, AppCategory } from '../types/index';
 
 /**
  * Accumulates productive and distraction time by subscribing to a ScreenMonitor.
- * Uses the ScreenMonitor's streak fields as the source of truth — each tick we
- * take the delta in productiveStreak / distractionStreak and add it to totals.
+ *
+ * Design note: we subscribe to the per-tick `'tick'` event (fires every poll),
+ * NOT the `'change'` event (fires only on category transitions). The previous
+ * design used streak deltas from 'change' events, which both (a) missed all
+ * time between transitions and (b) discarded seconds across streak resets.
+ * Accumulating elapsed wall-clock per tick is simpler and actually correct.
+ *
+ * Time is only added to a bucket when the tick's category matches that bucket:
+ * - productive tick → productiveTime += elapsed
+ * - distraction tick → distractionTime += elapsed
+ * - neutral / break ticks → nothing (they're neither win nor loss)
  */
 export class SessionStatsTracker {
   private stats: SessionStats;
-  private lastProductiveStreak = 0;
-  private lastDistractionStreak = 0;
+  private currentMode: AppCategory = 'neutral';
 
   constructor() {
     this.stats = {
@@ -21,23 +29,35 @@ export class SessionStatsTracker {
 
   /** Attach to a ScreenMonitor and start accumulating. */
   attach(monitor: ScreenMonitor): void {
-    monitor.on('change', (state: ScreenState) => this.ingest(state));
+    monitor.on(
+      'tick',
+      (payload: { category: AppCategory; elapsed: number }) => {
+        this.ingest(payload.category, payload.elapsed);
+      },
+    );
   }
 
-  /** Ingest a screen state snapshot and update totals. */
-  ingest(state: ScreenState): void {
-    if (state.productiveStreak >= this.lastProductiveStreak) {
-      this.stats.productiveTime += state.productiveStreak - this.lastProductiveStreak;
+  /**
+   * Ingest a single tick. `elapsed` is the wall-clock seconds since the
+   * previous tick; `category` is the classification at this tick. Exposed
+   * for testing with a fake monitor.
+   */
+  ingest(category: AppCategory, elapsed: number): void {
+    this.currentMode = category;
+    if (elapsed <= 0) return;
+    if (category === 'productive') {
+      this.stats.productiveTime += elapsed;
+    } else if (category === 'distraction') {
+      this.stats.distractionTime += elapsed;
     }
-    this.lastProductiveStreak = state.productiveStreak;
-
-    if (state.distractionStreak >= this.lastDistractionStreak) {
-      this.stats.distractionTime += state.distractionStreak - this.lastDistractionStreak;
-    }
-    this.lastDistractionStreak = state.distractionStreak;
+    // neutral / break: don't count — they're neither focus nor drift.
   }
 
   getStats(): SessionStats {
     return { ...this.stats };
+  }
+
+  getCurrentMode(): AppCategory {
+    return this.currentMode;
   }
 }

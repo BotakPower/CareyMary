@@ -1,5 +1,10 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { CareyMaryAPI, CharacterState, RTCJoinParams } from '../types';
+import type {
+  CareyMaryAPI,
+  CharacterState,
+  RTCJoinParams,
+  DashboardStatsPayload,
+} from '../types';
 
 // IPC channel names - must match src/main/ipc-handlers.ts IPC_CHANNELS.
 const CHANNELS = {
@@ -10,6 +15,7 @@ const CHANNELS = {
   rendererReady: 'renderer-ready',
   rendererLog: 'renderer-log',
   userTranscript: 'user-transcript',
+  sessionStats: 'session-stats',
 } as const;
 
 const api: CareyMaryAPI = {
@@ -42,6 +48,11 @@ const api: CareyMaryAPI = {
   },
   sendUserTranscript: (text: string) => {
     ipcRenderer.send(CHANNELS.userTranscript, text);
+  },
+  onSessionStats: (callback) => {
+    ipcRenderer.on(CHANNELS.sessionStats, (_event, stats: DashboardStatsPayload) =>
+      callback(stats),
+    );
   },
 };
 

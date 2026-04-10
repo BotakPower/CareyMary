@@ -16,6 +16,7 @@ import {
 } from '../core/context-engine';
 import {
   broadcastCharacterState,
+  broadcastSessionStats,
   requestStartRTC,
   requestSetMicEnabled,
   registerMainListeners,
@@ -26,7 +27,7 @@ dotenv.config({ path: path.join(__dirname, '..', '..', '.env') });
 const AGORA_ENABLED = (process.env.AGORA_ENABLED ?? 'false').toLowerCase() === 'true';
 const OLLAMA_ENABLED = (process.env.OLLAMA_ENABLED ?? 'true').toLowerCase() === 'true';
 const OLLAMA_URL = process.env.OLLAMA_URL ?? 'http://localhost:11434';
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? 'llama3.1:8b-instruct';
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? 'qwen2.5:7b';
 const CONTEXT_LOOP_MS = 2_000;
 // Don't nudge the user twice inside this window. Short so water can fire
 // shortly after the distraction callout in the demo flow.
@@ -96,7 +97,34 @@ function registerOverlayIpcHandlers(): void {
       return;
     }
     dashboardWindow = createDashboardWindow();
+    // Push the current stats once the window is ready so it doesn't render
+    // 00:00 for up to 2 seconds until the next context-loop tick arrives.
+    dashboardWindow.webContents.once('did-finish-load', () => {
+      pushStatsToDashboard();
+    });
   });
+}
+
+let dashboardPushCount = 0;
+function pushStatsToDashboard(): void {
+  if (!dashboardWindow || dashboardWindow.isDestroyed()) return;
+  if (!sessionStats) return;
+  const stats = sessionStats.getStats();
+  const mode = sessionStats.getCurrentMode();
+  broadcastSessionStats(dashboardWindow, {
+    productiveTime: stats.productiveTime,
+    distractionTime: stats.distractionTime,
+    startedAt: stats.startedAt,
+    mode,
+  });
+  // First push + every 5th push after that, so we can confirm flow in logs
+  // without spamming.
+  dashboardPushCount++;
+  if (dashboardPushCount === 1 || dashboardPushCount % 5 === 0) {
+    console.log(
+      `[dashboard] push #${dashboardPushCount}: productive=${stats.productiveTime}s distraction=${stats.distractionTime}s mode=${mode}`,
+    );
+  }
 }
 
 async function startServices(): Promise<void> {
@@ -232,6 +260,7 @@ function startContextLoop(): void {
       // everything that talks to Agora.
       const characterStateInGrace = pickCharacterState(screenState, dueReminders);
       broadcastCharacterState(overlayWindow, characterStateInGrace);
+      pushStatsToDashboard();
       return;
     }
 
@@ -286,6 +315,7 @@ function startContextLoop(): void {
 
     const characterState = pickCharacterState(screenState, dueReminders);
     broadcastCharacterState(overlayWindow, characterState);
+    pushStatsToDashboard();
   };
 
   // Delay the first tick until near the end of the startup grace window.
@@ -307,6 +337,9 @@ function registerTrayListeners(): void {
       return;
     }
     dashboardWindow = createDashboardWindow();
+    dashboardWindow.webContents.once('did-finish-load', () => {
+      pushStatsToDashboard();
+    });
   });
 
   ipcMain.on('tray:mic-toggle', (_event, muted: boolean) => {

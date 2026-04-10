@@ -35,6 +35,16 @@ export interface SessionStats {
   startedAt: number;
 }
 
+// Broadcast payload pushed from main to the dashboard window every tick.
+// Wraps SessionStats with the current mode so the dashboard can highlight
+// the right card without re-implementing classification.
+export interface DashboardStatsPayload {
+  productiveTime: number;
+  distractionTime: number;
+  startedAt: number;
+  mode: AppCategory;
+}
+
 // Character animation - CAREYMARY_CONTEXT.md Module 8
 export type CharacterState = 'idle' | 'talking' | 'alert' | 'happy' | 'sleeping';
 
@@ -62,4 +72,6 @@ export interface CareyMaryAPI {
   toggleDashboard: () => void;
   /** Forward a captured ASR transcript of the user's speech to main. */
   sendUserTranscript: (text: string) => void;
+  /** Subscribe to per-tick session stats. Used by the dashboard window. */
+  onSessionStats: (callback: (stats: DashboardStatsPayload) => void) => void;
 }

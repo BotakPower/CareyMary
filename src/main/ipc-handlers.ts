@@ -1,5 +1,5 @@
 import { BrowserWindow, ipcMain } from 'electron';
-import type { CharacterState, RTCJoinParams } from '../types';
+import type { CharacterState, RTCJoinParams, DashboardStatsPayload } from '../types';
 
 /** All IPC channel names - single source of truth. */
 export const IPC_CHANNELS = {
@@ -10,6 +10,7 @@ export const IPC_CHANNELS = {
   rendererReady: 'renderer-ready',
   rendererLog: 'renderer-log',
   userTranscript: 'user-transcript',
+  sessionStats: 'session-stats',
 } as const;
 
 /**
@@ -33,6 +34,15 @@ export function requestStopRTC(win: BrowserWindow): void {
 export function requestSetMicEnabled(win: BrowserWindow, enabled: boolean): void {
   if (win.isDestroyed()) return;
   win.webContents.send(IPC_CHANNELS.setMicEnabled, enabled);
+}
+
+/** Push the latest session stats snapshot to any window (usually the dashboard). */
+export function broadcastSessionStats(
+  win: BrowserWindow,
+  payload: DashboardStatsPayload,
+): void {
+  if (win.isDestroyed()) return;
+  win.webContents.send(IPC_CHANNELS.sessionStats, payload);
 }
 
 /**

@@ -12,6 +12,10 @@ const APP_CATEGORIES: Record<string, AppCategory> = {
   'WebStorm': 'productive',
   'Sublime Text': 'productive',
   'Warp': 'productive',
+  // Classify Electron as productive so dev-time testing of the dashboard
+  // actually shows focus time accumulate. When CareyMary runs in production
+  // the active window is the user's real app, not Electron itself.
+  'Electron': 'productive',
 
   // Distractions
   'TikTok': 'distraction',
@@ -122,16 +126,17 @@ export class ScreenMonitor extends EventEmitter {
 
   private async tick(): Promise<void> {
     try {
-      // Dynamic import for ESM-only active-win under module: commonjs.
+      // Dynamic import for ESM-only get-windows under module: commonjs.
+      // (active-win was renamed to get-windows upstream.)
       const dynamicImport = new Function('specifier', 'return import(specifier)');
-      const activeWinModule = await dynamicImport('active-win');
-      const mod: any = activeWinModule;
+      const getWindowsModule = await dynamicImport('get-windows');
+      const mod: any = getWindowsModule;
       const activeWin =
-        (typeof mod === 'function' ? mod : undefined) ??
+        (typeof mod?.activeWindow === 'function' ? mod.activeWindow : undefined) ??
         (typeof mod?.default === 'function' ? mod.default : undefined) ??
-        (typeof mod?.activeWindow === 'function' ? mod.activeWindow : undefined);
+        (typeof mod === 'function' ? mod : undefined);
       if (!activeWin) {
-        throw new Error('active-win import did not expose a callable function');
+        throw new Error('get-windows import did not expose a callable function');
       }
       const fn = activeWin as () => Promise<{
         owner?: { name?: string };
@@ -180,6 +185,11 @@ export class ScreenMonitor extends EventEmitter {
 
       this.state.appName = appName;
       this.state.category = category;
+
+      // Per-tick event — fires every poll, independent of category transitions.
+      // SessionStatsTracker subscribes to this so it can accumulate wall-clock
+      // time into the right bucket every tick (not only on category flips).
+      this.emit('tick', { category, elapsed, state: this.getState() });
 
       if (category !== prevCategory) {
         this.emit('change', this.getState());
