@@ -58,16 +58,42 @@ class AgoraRTCClient {
       return;
     }
     this.client = sdk.createClient({ mode: 'rtc', codec: 'vp8' });
-    await this.client.join(params.appId, params.channel, params.token, params.uid);
-    this.localAudioTrack = await sdk.createMicrophoneAudioTrack({ AEC: true, ANS: true, AGC: true });
-    await this.client.publish([this.localAudioTrack]);
+
+    // Subscribe listeners BEFORE join so we don't miss the agent's first publish.
     this.client.on('user-published', async (user: any, mediaType: string) => {
-      if (mediaType === 'audio') {
+      console.log('[AgoraRTCClient] user-published uid=', user.uid, 'mediaType=', mediaType);
+      if (mediaType !== 'audio') return;
+      try {
         await this.client.subscribe(user, mediaType);
-        user.audioTrack?.play();
+        const track = user.audioTrack;
+        if (!track) {
+          console.warn('[AgoraRTCClient] subscribe resolved without audioTrack for uid', user.uid);
+          return;
+        }
+        track.play();
         console.log('[AgoraRTCClient] remote audio playing from uid', user.uid);
+      } catch (err) {
+        console.error('[AgoraRTCClient] subscribe failed for uid', user.uid, err);
       }
     });
+
+    this.client.on('user-unpublished', (user: any, mediaType: string) => {
+      console.log('[AgoraRTCClient] user-unpublished uid=', user.uid, 'mediaType=', mediaType);
+    });
+
+    this.client.on('user-left', (user: any) => {
+      console.log('[AgoraRTCClient] user-left uid=', user.uid);
+    });
+
+    await this.client.join(params.appId, params.channel, params.token, params.uid);
+
+    this.localAudioTrack = await sdk.createMicrophoneAudioTrack({
+      AEC: true,
+      ANS: true,
+      AGC: true,
+    });
+    await this.client.publish([this.localAudioTrack]);
+
     this.connected = true;
     console.log('[AgoraRTCClient] joined channel', params.channel);
   }
