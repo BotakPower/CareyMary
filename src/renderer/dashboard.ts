@@ -26,6 +26,8 @@ const focusedBarEl = mustGet('focused-bar');
 const distractedBarEl = mustGet('distracted-bar');
 const modeEl = mustGet('mode');
 const streakEl = mustGet('streak');
+const focusRatioEl = mustGet('focus-ratio');
+const tipsEl = mustGet('tips');
 
 let focusedSeconds = 6 * 60 + 18; // mock
 let distractedSeconds = 2 * 60 + 41; // mock
@@ -53,6 +55,19 @@ function render(): void {
 
   modeEl.textContent = mode === 'focused' ? 'Focused' : 'Distracted';
   streakEl.textContent = `Streak: ${Math.floor(streakSeconds / 60)}:${pad2(streakSeconds % 60)}`;
+  focusRatioEl.textContent = `Focus ratio: ${focusPct.toFixed(0)}%`;
+
+  const suggestions =
+    mode === 'focused'
+      ? [
+          'You are in flow - stay on this tab for 10 more minutes.',
+          'Quick win: finish one small sub-task before switching tabs.',
+        ]
+      : [
+          'Switch back to your work tab and set a 5-minute restart timer.',
+          'Close 1 distracting tab now to reduce context switching.',
+        ];
+  tipsEl.innerHTML = suggestions.map((s) => `<li>${s}</li>`).join('');
 }
 
 setInterval(() => {
