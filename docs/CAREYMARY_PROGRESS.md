@@ -1,30 +1,44 @@
 # CareyMary Build Progress
 
 > Running log of what's shipped on `uat` and who owns what next.
-> Update after every merge. Anyone running `cat docs/CAREYMARY_PROGRESS.md` should get the current state in under 30 seconds.
+> Anyone running `cat docs/CAREYMARY_PROGRESS.md` should get the current state in under 30 seconds.
 
 **Hackathon:** Agora Voice AI Hackathon Singapore 2026 — 2026-04-10
 **Team:** Edmund (Dev 1) · ZhiHao (Dev 2) · SimYee (Dev 3) · Cody (Dev 4)
-**Current integration branch:** `ZM` (will merge to `uat` at T+3:30)
+**Current state:** ✅ All four dev lanes merged to `uat`. Live Agora voice loop verified end-to-end.
 
 ---
 
-## Current State
+## Current State — ALL SHIPPED ✅
 
 | Module | Owner | Status | File(s) |
 |---|---|---|---|
 | Foundation (Electron + types + scaffold) | Edmund | ✅ shipped (tag `foundation-v0`) | `src/main/`, `src/preload/`, `src/renderer/`, `src/types/`, `package.json`, `tsconfig.json` |
-| Screen monitor | ZhiHao + Edmund | ✅ shipped (active-win → get-windows swap by Edmund for Electron ABI compat) | `src/core/screen-monitor.ts` |
+| Screen monitor | ZhiHao + Edmund | ✅ shipped (active-win → get-windows swap for Electron ABI compat) | `src/core/screen-monitor.ts` |
 | Timer manager | ZhiHao | ✅ shipped | `src/core/timer-manager.ts` |
 | Context engine | Edmund | ✅ shipped | `src/core/context-engine.ts` |
 | Session stats | Edmund | ✅ shipped | `src/core/session-stats.ts` |
-| Agora ConvoAI agent | Edmund | ✅ shipped (dry-run) | `src/core/agora-agent.ts` |
-| Agora RTC client | Edmund | ✅ shipped (dry-run) | `src/core/agora-rtc.ts` |
+| Agora ConvoAI agent (REST) | Edmund | ✅ shipped | `src/core/agora-agent.ts` |
+| Agora RTC client (renderer SDK) | Edmund | ✅ shipped | `src/core/agora-rtc.ts`, `src/renderer/overlay.ts` |
 | IPC wiring + main loop | Edmund | ✅ shipped | `src/main/ipc-handlers.ts`, `src/preload/preload.ts`, `src/main/index.ts` |
 | RTC test harness | Edmund | ✅ shipped | `test-harness/rtc-test.html` |
 | System tray | SimYee + Edmund | ✅ shipped (wired into main/index.ts) | `src/main/tray.ts`, `src/main/index.ts` |
-| Character sprite UI | Cody + Edmund | ✅ merged (sprite via CSS state classes; co-lives with RTC client in overlay.ts) | `src/renderer/overlay.ts`, `src/renderer/styles.css`, `src/renderer/careymary-spritesheet.png`, `scripts/copy-renderer-assets.js` |
-| Real Agora credentials | ZhiHao | ⬜ not started | `.env` |
+| Character sprite UI | Cody + Edmund | ✅ shipped (sprite via CSS state classes; co-lives with RTC client in overlay.ts) | `src/renderer/overlay.ts`, `src/renderer/styles.css`, `src/renderer/careymary-spritesheet.png`, `scripts/copy-renderer-assets.js` |
+| Real Agora credentials | ZhiHao | ✅ populated in `.env`; `AGORA_ENABLED=true` verified live | `.env` |
+
+---
+
+## Live Smoke Test — 2026-04-10
+
+Ran `npm start` with `AGORA_ENABLED=true` and real credentials:
+
+- ✅ `ScreenMonitor` started, classifies active app correctly (`app=Warp category=productive`)
+- ✅ `TimerManager` started
+- ✅ `AgoraAgent.start()` → `POST /join` returned `agent_id=A42AN82VM77PN22VJ73XN94NN97ML73P`
+- ✅ Context loop tick #1 + tick #2 → `POST /update` succeeded, `prompt length=2090 → 2099` (growing as session stats accumulate)
+- ✅ Tray icon visible, context menu working
+- ✅ Overlay sprite renders in bottom-left, animates through `idle → happy` states based on screen category
+- ⚠️ Chromium logs `BUNDLE codec collision` SDP warnings — cosmetic, audio works fine
 
 ---
 
@@ -36,7 +50,7 @@
 - Tag: `foundation-v0`
 
 ### 2026-04-10 — Monitors (ZhiHao → merged into Edmund's ZM branch)
-- `ScreenMonitor` — active-win polling every 5s, app categorization, `'change'` events
+- `ScreenMonitor` — polling every 5s, app categorization, `'change'` events
 - `TimerManager` — water/break/posture/stretch reminders, acknowledge API, `'reminder'` events
 - Tests: `tests/screen-monitor.test.ts`, `tests/timer-manager.test.ts`
 
@@ -46,7 +60,6 @@
 - Shipped: context-engine, session-stats, agora-agent (REST), agora-rtc (renderer SDK wrapper), ipc-handlers, main process wiring, RTC test harness
 - Context loop: 30s tick builds prompt from ScreenMonitor + TimerManager + SessionStats, pushes to AgoraAgent, broadcasts character-state to overlay
 - **Screen monitor swap:** active-win's native N-API binary wouldn't self-register under Electron 33's ABI even after `electron-rebuild`; swapped to `get-windows` (maintained successor, uses a spawned Swift binary — no N-API rebuild needed). macOS grants screen recording permission on first run.
-- Smoke test ✅: `app=Warp category=productive`, zero errors, DRY RUN logs fire every 30s
 
 ### 2026-04-10 — Dev 4 Character Sprite (Cody → merged into uat)
 - 2×2 spritesheet (`src/renderer/careymary-spritesheet.png`), CSS-driven animation via `.state-idle/.state-talking/.state-alert/.state-happy/.state-sleeping` on `#character`
@@ -69,38 +82,39 @@
   - `tray:ack-water` / `tray:ack-break` → `timerManager.acknowledge('water' | 'break')`
   - Tray created in `app.whenReady`, destroyed in `before-quit`
 
-### 2026-04-10 — Dev 2 Real Agora Credentials (ZhiHao) — NOT STARTED
-- Fill `.env` with `AGORA_APP_ID`, `AGORA_CUSTOMER_ID`, `AGORA_CUSTOMER_SECRET`, `AGORA_RTC_TOKEN`
-- Flip `AGORA_ENABLED=true` and verify end-to-end voice loop
+### 2026-04-10 — Dev 2 Real Agora Credentials (ZhiHao) — DONE
+- Filled `.env` with `AGORA_APP_ID`, `AGORA_CUSTOMER_ID`, `AGORA_CUSTOMER_SECRET`, `AGORA_RTC_TOKEN`
+- Flipped `AGORA_ENABLED=true`
+- End-to-end voice loop verified: `/join` returned real `agent_id`, `/update` succeeded, audio round-trip working
 
 ---
 
-## How to Run (current)
+## How to Run
 
 ```bash
 npm install
-cp .env.example .env   # optional — only needed when AGORA_ENABLED=true
+cp .env.example .env   # fill in Agora credentials
 npm start
 ```
 
-**Expected:**
-- Transparent overlay in bottom-left corner (200x200)
+**Dry-run mode** (`AGORA_ENABLED=false`):
+- Transparent overlay in bottom-left corner (200×200) with animated sprite
 - Console logs every 30s from the context loop
-- In dry-run: `[AgoraAgent] DRY RUN ...` lines showing what would be sent
+- `[AgoraAgent] DRY RUN ...` lines showing what would be sent
+- No network calls to Agora
 
-**For real voice loop:**
-1. Fill `.env` with Agora credentials from console.agora.io
-2. Set `AGORA_ENABLED=true`
-3. Restart
+**Live mode** (`AGORA_ENABLED=true`, credentials populated):
+- Agent joins the Agora channel, greets the user
+- Context updates every 30s with current screen state + session stats
+- Tray menu controls mic/pause/reminders
+- Character sprite reflects state (`idle`/`happy`/`alert`)
 
 ---
 
-## Integration Order (remaining)
+## Next Steps (remaining to submit)
 
-1. ✅ T+0: Edmund foundation (`foundation-v0` tag)
-2. ✅ T+0: ZhiHao monitors (merged into `ZM`)
-3. ✅ T+3:30: Edmund Agora + context + wiring (on `ZM`, ready for `uat` merge)
-4. ✅ T+?: SimYee tray → merged to `uat`
-5. ✅ T+?: Cody character sprite → merged to `uat`
-6. ⬜ T+5:00: Demo rehearsal + bug bash
-7. ⬜ T+6:00: Submit
+1. ⬜ **Demo rehearsal** — run through the pitch flow, make sure voice responses land on cue
+2. ⬜ **Bug bash** — short polish pass on tray icon asset, animation timing, any leftover console warnings
+3. ⬜ **Submission** — record demo video, fill submission form, tag `uat` as `hackathon-submission`
+
+See the per-dev breakdown at the bottom of the repo README for assignments.
