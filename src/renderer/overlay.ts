@@ -22,6 +22,7 @@ interface CareyMaryAPI {
   quitCareyMary: () => void;
   toggleDashboard: () => void;
   logToMain: (message: string) => void;
+  sendUserTranscript: (text: string) => void;
 }
 
 const STATE_CLASSES: CharacterState[] = ['idle', 'talking', 'alert', 'happy', 'sleeping'];
@@ -54,7 +55,254 @@ function pulseTalking(ms = 1200): void {
 class AgoraRTCClient {
   private client: any = null;
   private localAudioTrack: any = null;
+  private remoteAudioTrack: any = null;
   private connected = false;
+  // Anti-echo state: when the agent is speaking, we mute the local mic so
+  // the laptop mic doesn't pick up the laptop speakers and feed CareyMary's
+  // own voice back into ASR (which causes her to interrupt herself). We
+  // track this with a handle instead of a flag because we want the unmute
+  // to happen on a short delay after user-unpublished, so we don't catch
+  // the trailing tail of the TTS clip.
+  private micUnmuteTimer: ReturnType<typeof setTimeout> | null = null;
+  // CareyMary only listens long enough to hear the user's goal. Flow:
+  //   Turn 1: Agent says "What are you working on today?"
+  //   Turn 2: User answers (captured via stream-message user transcription)
+  //   Turn 3: Agent acknowledges "I see, let's work on..."
+  //   After the agent finishes turn 3 the mic is permanently disabled.
+  //
+  // We track turn completion via the Conversational AI stream-message
+  // events (object="message.state", state="silent", turn_id=N) NOT via
+  // RTC publish/unpublish events. Minimax TTS chunks a single utterance
+  // into multiple publish cycles, so publish counting is unreliable —
+  // counting `state=silent` keyed by turn_id is the correct boundary.
+  private lastAgentTurnSilent = 0;
+  private micPermanentlyOff = false;
+  // How long to wait after the agent stops publishing before we re-enable
+  // the mic. Short so we don't clip the user's opening words when they
+  // answer the goal question. 80ms is fast enough that a late start on
+  // "I'm working on X" still captures the "I" cleanly.
+  private static readonly MIC_UNMUTE_DELAY_MS = 80;
+
+  // Safety net: if user-unpublished never fires (subscribe error, missed
+  // event, connection hiccup), the mic would be stuck muted forever. This
+  // max-duration timer guarantees we unmute eventually so the user can
+  // always speak again.
+  private static readonly MIC_SAFETY_UNMUTE_MS = 8000;
+  private safetyUnmuteTimer: ReturnType<typeof setTimeout> | null = null;
+
+  private muteMicForAgentSpeech(): void {
+    // Permanent off wins — never reach for the mic again once CareyMary
+    // has stopped listening.
+    if (this.micPermanentlyOff) return;
+    if (this.micUnmuteTimer) {
+      clearTimeout(this.micUnmuteTimer);
+      this.micUnmuteTimer = null;
+    }
+    if (this.localAudioTrack) {
+      try {
+        this.localAudioTrack.setEnabled(false);
+      } catch (e) {
+        rlog('[rtc] mic mute error (ignored):', (e as Error).message ?? e);
+      }
+    }
+    // Arm the safety net each time we mute.
+    if (this.safetyUnmuteTimer) clearTimeout(this.safetyUnmuteTimer);
+    this.safetyUnmuteTimer = setTimeout(() => {
+      this.safetyUnmuteTimer = null;
+      if (this.localAudioTrack) {
+        try {
+          this.localAudioTrack.setEnabled(true);
+          rlog('[rtc] mic safety-unmuted (user-unpublished missed)');
+        } catch (e) {
+          rlog('[rtc] safety unmute error (ignored):', (e as Error).message ?? e);
+        }
+      }
+    }, AgoraRTCClient.MIC_SAFETY_UNMUTE_MS);
+  }
+
+  private scheduleMicUnmute(): void {
+    if (this.micPermanentlyOff) return;
+    if (this.micUnmuteTimer) {
+      clearTimeout(this.micUnmuteTimer);
+    }
+    if (this.safetyUnmuteTimer) {
+      clearTimeout(this.safetyUnmuteTimer);
+      this.safetyUnmuteTimer = null;
+    }
+    this.micUnmuteTimer = setTimeout(() => {
+      this.micUnmuteTimer = null;
+      if (this.micPermanentlyOff) return;
+      if (this.localAudioTrack) {
+        try {
+          this.localAudioTrack.setEnabled(true);
+          rlog('[rtc] mic re-enabled (agent finished speaking)');
+        } catch (e) {
+          rlog('[rtc] mic unmute error (ignored):', (e as Error).message ?? e);
+        }
+      }
+    }, AgoraRTCClient.MIC_UNMUTE_DELAY_MS);
+  }
+
+  private killMicPermanently(reason: string): void {
+    if (this.micPermanentlyOff) return;
+    this.micPermanentlyOff = true;
+    if (this.micUnmuteTimer) {
+      clearTimeout(this.micUnmuteTimer);
+      this.micUnmuteTimer = null;
+    }
+    if (this.safetyUnmuteTimer) {
+      clearTimeout(this.safetyUnmuteTimer);
+      this.safetyUnmuteTimer = null;
+    }
+    if (this.localAudioTrack) {
+      try {
+        this.localAudioTrack.setEnabled(false);
+        rlog('[rtc] mic PERMANENTLY OFF —', reason);
+      } catch (e) {
+        rlog('[rtc] permanent mute error (ignored):', (e as Error).message ?? e);
+      }
+    }
+  }
+
+  // ---- Stream-message decoding + turn tracking ----
+  // Chunks currently being reassembled, keyed by msg_id. Each chunk arrives
+  // as its own stream-message event; we accumulate base64 parts until all
+  // `total` parts are present, then decode + parse the combined payload.
+  private streamChunks = new Map<string, { total: number; parts: string[]; received: number }>();
+  // Dedup: the agent sometimes re-broadcasts completed messages multiple
+  // times (observed in the log). Once we've processed a msg_id we don't
+  // re-process it.
+  private processedMsgIds = new Set<string>();
+
+  private handleStreamMessagePart(payload: Uint8Array): void {
+    let raw = '';
+    try {
+      raw = new TextDecoder().decode(payload);
+    } catch (e) {
+      rlog('[rtc] stream-message decode error:', (e as Error).message ?? e);
+      return;
+    }
+
+    // Framing: "<msg_id>|<chunk_idx>|<total>|<b64>"
+    // The base64 payload itself may contain '=' padding but no '|', so the
+    // first three pipes are always the framing separators.
+    const firstBar = raw.indexOf('|');
+    const secondBar = raw.indexOf('|', firstBar + 1);
+    const thirdBar = raw.indexOf('|', secondBar + 1);
+    if (firstBar < 0 || secondBar < 0 || thirdBar < 0) {
+      rlog('[rtc] stream-message unframed, ignoring:', raw.slice(0, 120));
+      return;
+    }
+    const msgId = raw.slice(0, firstBar);
+    const idx = parseInt(raw.slice(firstBar + 1, secondBar), 10);
+    const total = parseInt(raw.slice(secondBar + 1, thirdBar), 10);
+    const b64 = raw.slice(thirdBar + 1);
+    if (!msgId || !Number.isFinite(idx) || !Number.isFinite(total) || total <= 0) {
+      rlog('[rtc] stream-message bad frame header, ignoring');
+      return;
+    }
+
+    if (this.processedMsgIds.has(msgId)) return;
+
+    let entry = this.streamChunks.get(msgId);
+    if (!entry) {
+      entry = { total, parts: new Array(total).fill(''), received: 0 };
+      this.streamChunks.set(msgId, entry);
+    }
+    // idx is 1-based in Agora's framing
+    const slot = idx - 1;
+    if (slot < 0 || slot >= entry.parts.length) return;
+    if (entry.parts[slot] === '') {
+      entry.parts[slot] = b64;
+      entry.received++;
+    }
+    if (entry.received < entry.total) return;
+
+    // All parts received — assemble + decode
+    this.streamChunks.delete(msgId);
+    this.processedMsgIds.add(msgId);
+    // Bound the dedup set so it doesn't grow forever over a long session.
+    if (this.processedMsgIds.size > 500) {
+      const first = this.processedMsgIds.values().next().value;
+      if (first) this.processedMsgIds.delete(first);
+    }
+
+    const combinedB64 = entry.parts.join('');
+    let jsonText = '';
+    try {
+      jsonText = atob(combinedB64);
+    } catch (e) {
+      rlog('[rtc] base64 decode failed for msg', msgId, (e as Error).message ?? e);
+      return;
+    }
+    let msg: any;
+    try {
+      msg = JSON.parse(jsonText);
+    } catch (e) {
+      rlog('[rtc] JSON parse failed for msg', msgId, ':', jsonText.slice(0, 200));
+      return;
+    }
+
+    this.onAgoraMessage(msg);
+  }
+
+  private onAgoraMessage(msg: any): void {
+    const object: string = msg.object ?? msg.type ?? '';
+    // Terse log — one line per decoded message
+    const preview = typeof msg.text === 'string' ? msg.text.slice(0, 80) : '';
+    rlog(
+      '[rtc] msg',
+      object,
+      'turn=', msg.turn_id ?? '-',
+      'state=', msg.state ?? '-',
+      preview ? 'text=' + JSON.stringify(preview) : '',
+    );
+
+    // Agent turn lifecycle: message.state speaking → silent, keyed by turn_id.
+    // turn_id=0 is the initial idle/silent before the agent starts talking.
+    // turn_id=1 is the greeting ("What are you working on today?"). When
+    // that turn's state flips to 'silent', the greeting is done and the user
+    // should be able to answer — unmute the mic.
+    // turn_id=2 is the agent's acknowledgement ("I see, let's work on...").
+    // When that turn's state flips to 'silent', kill the mic for good.
+    if (
+      object === 'message.state' &&
+      msg.state === 'silent' &&
+      typeof msg.turn_id === 'number' &&
+      msg.turn_id >= 1 &&
+      msg.turn_id > this.lastAgentTurnSilent
+    ) {
+      this.lastAgentTurnSilent = msg.turn_id;
+      rlog('[rtc] agent finished turn', msg.turn_id, '→ acting on it');
+      if (msg.turn_id >= 2) {
+        this.killMicPermanently('agent acknowledgement done (turn 2 silent)');
+      } else {
+        this.scheduleMicUnmute();
+      }
+      return;
+    }
+
+    // User transcription: capture the first final one and forward to main
+    // for Ollama goal extraction. Object name guesses cover known Agora
+    // Conversational AI variants.
+    const isUserTranscription =
+      object === 'user.transcription' ||
+      object === 'user.transcribe' ||
+      (object === 'transcription' && (msg.role === 'user' || msg.speaker === 'user'));
+    if (isUserTranscription) {
+      const text: string = typeof msg.text === 'string' ? msg.text : '';
+      const isFinal: boolean =
+        msg.final === true ||
+        msg.is_final === true ||
+        msg.final_text === true ||
+        msg.turn_status === 2;
+      if (text && isFinal) {
+        rlog('[rtc] USER TRANSCRIPT (final):', text);
+        const bridge = (window as Window & { careymary?: CareyMaryAPI }).careymary;
+        bridge?.sendUserTranscript?.(text);
+      }
+    }
+  }
 
   async join(params: RTCJoinParams): Promise<void> {
     if (!params.enabled) {
@@ -73,25 +321,126 @@ class AgoraRTCClient {
 
     this.client.on('user-published', async (user: any, mediaType: string) => {
       if (mediaType !== 'audio') return;
+      // The agent is about to talk — mute our mic synchronously (before we
+      // even subscribe) so there's zero window for our speakers to loop back
+      // into the mic capture.
+      this.muteMicForAgentSpeech();
       try {
         await this.client.subscribe(user, mediaType);
-        user.audioTrack?.play();
+        const track = user.audioTrack;
+        if (!track) {
+          rlog('[rtc] WARN: subscribe resolved without audioTrack for uid', user.uid);
+          return;
+        }
+        // CRITICAL: Stop the previous remote track before starting a new one.
+        // Minimax TTS chunks speech into segments and the agent republishes
+        // its audio track between segments. Without this stop, each republish
+        // stacks a new playing track on top of the old one → overlapping
+        // playback → choppy / doubled audio. Stop-then-play keeps the stream
+        // monophonic and clean.
+        if (this.remoteAudioTrack && this.remoteAudioTrack !== track) {
+          try {
+            this.remoteAudioTrack.stop();
+          } catch (e) {
+            rlog('[rtc] remote track stop error (ignored):', (e as Error).message ?? e);
+          }
+        }
+        this.remoteAudioTrack = track;
+        track.play();
+        // Visual feedback: pulse the sprite to "talking" while the agent
+        // speaks. pulseTalking() auto-reverts to the baseState after its
+        // timeout, so we don't need to clear it manually on unpublish.
         pulseTalking(1400);
-        rlog('[rtc] remote audio playing uid=', user.uid);
+        rlog('[rtc] remote audio playing from uid', user.uid);
       } catch (err) {
         rlog('[rtc] subscribe error', (err as Error).message ?? err);
       }
     });
 
-    await this.client.join(params.appId, params.channel, params.token, params.uid);
-    this.localAudioTrack = await sdk.createMicrophoneAudioTrack({
-      AEC: false,
-      ANS: false,
-      AGC: false,
+    this.client.on('user-unpublished', (user: any, mediaType: string) => {
+      rlog('[rtc] user-unpublished uid=', user.uid, 'mediaType=', mediaType);
+      if (mediaType !== 'audio') return;
+      // Stop the playing remote track as soon as the agent stops publishing.
+      // Agora's SDK will hand us a fresh track on the next user-published
+      // event — we don't want the old one lingering and overlapping.
+      if (this.remoteAudioTrack) {
+        try {
+          this.remoteAudioTrack.stop();
+        } catch (e) {
+          rlog('[rtc] remote track stop error (ignored):', (e as Error).message ?? e);
+        }
+        this.remoteAudioTrack = null;
+      }
+      // NOTE: we intentionally do NOT count unpublish events to decide
+      // mic state. Minimax TTS chunks one utterance into multiple publish
+      // cycles, so publish counting races the real turn boundaries.
+      // Mic state is driven by message.state → silent events, handled
+      // inside handleStreamMessagePart().
     });
-    await this.client.publish([this.localAudioTrack]);
+
+    this.client.on('user-left', (user: any) => {
+      rlog('[rtc] user-left uid=', user.uid);
+    });
+
+    this.client.on('connection-state-change', (cur: string, prev: string) => {
+      rlog('[rtc] connection-state-change', prev, '->', cur);
+    });
+
+    // Agora Conversational AI sends ASR + lifecycle events as chunked data
+    // messages. Framing (empirically verified):
+    //   "<msg_id>|<chunk_idx>|<total_chunks>|<base64-json>"
+    // We reassemble by msg_id, base64-decode, JSON-parse. Then we inspect
+    // the `object` field: message.state drives turn tracking, and
+    // user.transcription (with final=true) is the captured goal.
+    this.client.on('stream-message', (_uid: any, payload: Uint8Array) => {
+      this.handleStreamMessagePart(payload);
+    });
+
+    try {
+      await this.client.join(params.appId, params.channel, params.token, params.uid);
+      rlog('[rtc] joined channel', params.channel);
+    } catch (err) {
+      rlog('[rtc] ERROR: join failed:', (err as Error).message ?? err);
+      throw err;
+    }
+
+    // AEC/ANS/AGC on the Agora Web SDK mic track share a processing pipeline
+    // with remote playback. In Electron, clock drift between capture and
+    // playback makes the echo canceller drop/clip frames, producing choppy
+    // remote audio. Disable the software processors and rely on the OS —
+    // macOS CoreAudio handles EC cleanly, and we don't need browser AEC.
+    try {
+      this.localAudioTrack = await sdk.createMicrophoneAudioTrack({
+        AEC: false,
+        ANS: false,
+        AGC: false,
+      });
+      rlog('[rtc] mic track created');
+    } catch (err) {
+      rlog('[rtc] ERROR: createMicrophoneAudioTrack failed:', (err as Error).message ?? err);
+      throw err;
+    }
+
+    try {
+      await this.client.publish([this.localAudioTrack]);
+      rlog('[rtc] mic published');
+    } catch (err) {
+      rlog('[rtc] ERROR: publish failed:', (err as Error).message ?? err);
+      throw err;
+    }
+
+    // Start muted — the greeting is about to play through the laptop
+    // speakers and we don't want the mic to loop it back before the first
+    // user-published event fires. Mic will unmute after turn 1 ends
+    // (message.state silent, turn_id=1) inside handleStreamMessagePart().
+    try {
+      this.localAudioTrack.setEnabled(false);
+      rlog('[rtc] mic starts muted (will unmute after greeting)');
+    } catch (e) {
+      rlog('[rtc] initial mic mute error (ignored):', (e as Error).message ?? e);
+    }
+
     this.connected = true;
-    rlog('[rtc] joined channel', params.channel);
   }
 
   async leave(): Promise<void> {

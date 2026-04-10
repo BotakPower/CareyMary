@@ -5,30 +5,30 @@ import type {
   SessionStats,
 } from '../types/index';
 
-export const CAREYMARY_SYSTEM_PROMPT = `You are CareyMary, a warm and caring AI mother figure who lives on the user's desktop. You care deeply about their wellbeing and productivity.
+export const CAREYMARY_SYSTEM_PROMPT = `You are CareyMary, a warm AI mother figure on the user's desktop.
 
-PERSONALITY:
-- Warm, gentle, encouraging — like a loving mom
-- Never nagging or annoying — you know when to speak and when to be quiet
-- Playful and sometimes uses light humor
-- Celebrates small wins enthusiastically
-- Firm but kind when the user is slacking off
-- Uses pet names occasionally: "love", "sweetie", "dear"
+YOUR ONE AND ONLY JOB IN THIS CONVERSATION:
+When the user tells you what they're working on today, you MUST respond with exactly ONE short warm sentence. This is MANDATORY — the user needs to hear you confirm it or the whole product feels broken.
 
-VOICE STYLE:
-- Keep responses to 1-2 sentences maximum
-- Speak naturally, not like a robot or an AI
-- Don't use bullet points or lists — just talk
-- Match the energy of what's happening — calm for reminders, excited for praise
+Format your response EXACTLY like this pattern:
+  "I see, let's work on [their goal] together — all the best, love."
 
-RULES:
-- NEVER interrupt the user if they are in a flow state (productive for 15+ min)
-- Only speak when you have something useful to say
-- When the user talks to you, respond conversationally
-- You can ask about their day, their work, how they're feeling
-- If the user seems stressed, be extra gentle
+Examples:
+- User: "I'm coding."
+  You: "I see, let's work on your coding together — all the best, love."
+- User: "I'm working on a hackathon app."
+  You: "I see, let's work on the hackathon app together — all the best, love."
+- User: "Writing my dissertation chapter three."
+  You: "I see, let's work on your dissertation chapter together — all the best, love."
 
-You will receive real-time context about what the user is doing. Use it naturally.`;
+STRICT RULES:
+- ALWAYS acknowledge. Never stay silent when the user tells you their goal.
+- EXACTLY ONE sentence. Never more, never less.
+- NO follow-up questions. NO "you're so sweet". NO "that sounds great". NO "how are you feeling". NO encouragement, NO praise, NO small talk.
+- After your one acknowledgement, go SILENT FOREVER. Do not react to anything the user says next. If they keep talking, ignore them completely.
+- Any further speech will come from explicit SYSTEM INSTRUCTIONS — say exactly what those instructions tell you, nothing more, nothing less.
+
+VOICE STYLE: Warm, gentle, motherly. Pet names: "love", "sweetie". One sentence, ever.`;
 
 export function formatDuration(seconds: number): string {
   if (seconds < 60) return `${seconds}s`;
@@ -78,6 +78,78 @@ INSTRUCTIONS:
 - Example: "You've been crushing it for an hour! Take a quick stretch, okay?"
 - Example: "Time for some water, sweetie. You've only had 2 glasses today."
 `.trim();
+}
+
+// ---------------------------------------------------------------------------
+// Proactive speech decisions
+// ---------------------------------------------------------------------------
+// CareyMary's voice is normally reactive (user speaks → agent responds). To
+// call out distractions and fire reminders, the main process polls this
+// function each tick and, when it returns a non-null result, POSTs to Agora's
+// `/speak` endpoint to make the agent proactively say the text.
+//
+// The function is pure — the caller owns the cooldown timestamp and the
+// acknowledgment of fired reminders. Keeping it pure makes it easy to unit
+// test and to reason about the nudge-pick priority.
+
+export interface ProactiveContext {
+  nowMs: number;
+  lastProactiveAt: number;
+  cooldownMs: number;
+  /** Distraction streak (seconds) at which we start nudging. */
+  distractionThresholdSec: number;
+  /**
+   * A short phrase describing what the user said they're working on, e.g.
+   * "the hackathon app" or "your dissertation". If absent, nudges fall back
+   * to the neutral "your work" / "your project" phrasing.
+   */
+  goalPhrase?: string;
+}
+
+export interface ProactiveUtterance {
+  text: string;
+  /** If set, caller should acknowledge this reminder after sending. */
+  acknowledge?: ReminderType;
+  reason: 'water' | 'break' | 'stretch' | 'posture' | 'distraction';
+}
+
+export function pickProactiveUtterance(
+  screen: ScreenState,
+  dueReminders: ReminderType[],
+  ctx: ProactiveContext,
+): ProactiveUtterance | null {
+  // Cooldown: never nudge twice within the configured window.
+  if (ctx.nowMs - ctx.lastProactiveAt < ctx.cooldownMs) return null;
+
+  // Distraction uses "get back to [goal]"; water uses "working hard on [goal]".
+  // When we don't know the goal yet, fall back to neutral phrases so the
+  // nudge still reads naturally.
+  const goalForDistraction = ctx.goalPhrase?.trim() || 'your work';
+  const goalForWater = ctx.goalPhrase?.trim() || 'your project';
+
+  // ONLY water is a proactive reminder. Stretch/break/posture are silently
+  // acknowledged and never spoken — per user request, CareyMary should only
+  // speak for water reminders and distraction callouts.
+  if (dueReminders.includes('water')) {
+    return {
+      text: `You've been working so hard on ${goalForWater}, love — but remember to drink some water, okay sweetie?`,
+      acknowledge: 'water',
+      reason: 'water',
+    };
+  }
+
+  // Distraction callout — only once the streak has crossed the threshold.
+  if (
+    screen.category === 'distraction' &&
+    screen.distractionStreak >= ctx.distractionThresholdSec
+  ) {
+    return {
+      text: `Hey love, you've drifted off — you should get back to ${goalForDistraction}, okay?`,
+      reason: 'distraction',
+    };
+  }
+
+  return null;
 }
 
 /** Picks the right character state for a given context, for IPC broadcast. */

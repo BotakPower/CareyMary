@@ -20,6 +20,20 @@ const APP_CATEGORIES: Record<string, AppCategory> = {
   'Netflix': 'distraction',
   'Twitch': 'distraction',
 
+  // Browsers default to distraction. Without macOS Screen Recording permission,
+  // get-windows can't read window titles and returns just the app name — so a
+  // Chrome tab on YouTube looks identical to a Chrome tab on GitHub. For the
+  // demo, treat browsers as distraction by default. When title access DOES
+  // work, PRODUCTIVE_TITLES (GitHub / Stack Overflow / localhost) overrides
+  // this in classifyApp() and lifts the classification back to productive.
+  'Google Chrome': 'distraction',
+  'Chrome': 'distraction',
+  'Arc': 'distraction',
+  'Safari': 'distraction',
+  'Firefox': 'distraction',
+  'Microsoft Edge': 'distraction',
+  'Brave Browser': 'distraction',
+
   // Neutral
   'Slack': 'neutral',
   'Discord': 'neutral',
@@ -35,7 +49,25 @@ const APP_CATEGORIES: Record<string, AppCategory> = {
 };
 
 // Browser tab titles that indicate distraction
-const DISTRACTION_TITLES = ['YouTube', 'Reddit', 'TikTok', 'Instagram', 'Twitter', 'Netflix', 'Twitch'];
+const DISTRACTION_TITLES = ['YouTube', 'Reddit', 'TikTok', 'Instagram', 'Twitter', 'Netflix', 'Twitch', 'Facebook'];
+
+// Browser tab titles / URLs that indicate productive coding work. Checked when
+// the active app is a browser (Chrome / Arc / Safari / Edge) — so a Chrome
+// window on GitHub counts as productive, but a Chrome window on YouTube does not.
+const PRODUCTIVE_TITLES = [
+  'GitHub',
+  'Stack Overflow',
+  'stackoverflow',
+  'MDN',
+  'developer.mozilla',
+  'localhost',
+  '127.0.0.1',
+  'ChatGPT',
+  'Claude',
+  'Linear',
+  'Jira',
+  'Figma',
+];
 
 export class ScreenMonitor extends EventEmitter {
   private state: ScreenState = {
@@ -50,16 +82,22 @@ export class ScreenMonitor extends EventEmitter {
   private lastTickTime: number = Date.now();
   private readonly pollIntervalMs: number;
 
-  constructor(pollIntervalMs = 5000) {
+  constructor(pollIntervalMs = 2000) {
     super();
     this.pollIntervalMs = pollIntervalMs;
   }
 
   /** Classifies an app by name + window title. Public for testing. */
   classifyApp(appName: string, windowTitle: string): AppCategory {
-    // Check browser tab title for distracting sites
+    // Distraction titles win over productive titles — YouTube in a GitHub
+    // tab is still YouTube. Check specific-signal titles before falling back
+    // to the app-name map.
     for (const keyword of DISTRACTION_TITLES) {
       if (windowTitle.includes(keyword)) return 'distraction';
+    }
+
+    for (const keyword of PRODUCTIVE_TITLES) {
+      if (windowTitle.includes(keyword)) return 'productive';
     }
 
     return APP_CATEGORIES[appName] ?? 'neutral';
@@ -109,6 +147,16 @@ export class ScreenMonitor extends EventEmitter {
       const windowTitle = result?.title ?? appName;
       const category = this.classifyApp(appName, windowTitle);
       const prevCategory = this.state.category;
+
+      // Debug: log raw app + title so we can see whether macOS Screen Recording
+      // permission is letting get-windows read the tab title (e.g. "YouTube -
+      // ..." vs. just "Google Chrome"). If the title equals the app name, the
+      // OS is redacting it — see the APP_CATEGORIES browser fallback above.
+      if (appName !== this.state.appName || category !== prevCategory) {
+        console.log(
+          `[ScreenMonitor] app="${appName}" title="${windowTitle}" → ${category}`,
+        );
+      }
 
       // Update streaks
       if (category === 'distraction') {

@@ -1,11 +1,15 @@
 import { EventEmitter } from 'events';
 import { TimerConfig, TimerState, ReminderType } from '../types/index';
 
+// Demo-tuned intervals: the hackathon flow is ~1 min — grace window (30s)
+// covers the goal Q&A, then user drifts to YouTube, distraction callout
+// fires around 40-45s, and water fires shortly after. Stretch/break/posture
+// are pushed far out because CareyMary no longer speaks them anyway.
 const DEFAULT_CONFIG: TimerConfig = {
-  waterIntervalMs: 30 * 60 * 1000,   // 30 min
-  breakIntervalMs: 45 * 60 * 1000,   // 45 min
-  postureCheckMs:  20 * 60 * 1000,   // 20 min
-  stretchIntervalMs: 60 * 60 * 1000, // 60 min
+  waterIntervalMs:   45 * 1000,        // 45s — fires shortly after distraction
+  stretchIntervalMs: 60 * 60 * 1000,   // 60 min (silenced)
+  breakIntervalMs:   60 * 60 * 1000,   // 60 min (silenced)
+  postureCheckMs:    60 * 60 * 1000,   // 60 min (silenced)
 };
 
 export class TimerManager extends EventEmitter {

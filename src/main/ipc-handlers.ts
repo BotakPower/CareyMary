@@ -9,6 +9,7 @@ export const IPC_CHANNELS = {
   setMicEnabled: 'set-mic-enabled',
   rendererReady: 'renderer-ready',
   rendererLog: 'renderer-log',
+  userTranscript: 'user-transcript',
 } as const;
 
 /**
@@ -36,9 +37,16 @@ export function requestSetMicEnabled(win: BrowserWindow, enabled: boolean): void
 
 /**
  * Register main-side listeners for signals coming FROM the renderer.
- * Right now there's only renderer-ready. Extend here as tray/acknowledge wiring lands.
+ * - `onRendererReady`: the overlay finished mounting — safe to kick RTC.
+ * - `onUserTranscript`: a final ASR transcript of something the user said,
+ *   forwarded from the renderer's Agora stream-message listener. Main uses
+ *   this (exactly once, for the first utterance) to extract the user's goal
+ *   via Ollama and interpolate it into later nudge text.
  */
-export function registerMainListeners(onRendererReady: () => void): void {
+export function registerMainListeners(
+  onRendererReady: () => void,
+  onUserTranscript: (text: string) => void,
+): void {
   ipcMain.on(IPC_CHANNELS.rendererReady, () => {
     console.log('[ipc] renderer-ready received');
     onRendererReady();
@@ -51,5 +59,11 @@ export function registerMainListeners(onRendererReady: () => void): void {
     if (typeof message === 'string') {
       console.log('[renderer]', message);
     }
+  });
+
+  ipcMain.on(IPC_CHANNELS.userTranscript, (_event, text: unknown) => {
+    if (typeof text !== 'string' || text.trim().length === 0) return;
+    console.log('[ipc] user-transcript received:', text.slice(0, 200));
+    onUserTranscript(text.trim());
   });
 }

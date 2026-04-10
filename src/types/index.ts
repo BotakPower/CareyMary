@@ -56,6 +56,10 @@ export interface CareyMaryAPI {
   notifyRendererReady: () => void;
   setOverlayPassthrough: (passthrough: boolean) => void;
   quitCareyMary: () => void;
+  /** Forward a renderer log line to the main process terminal. */
   logToMain: (message: string) => void;
+  /** Open/close Cody's productivity dashboard window. */
   toggleDashboard: () => void;
+  /** Forward a captured ASR transcript of the user's speech to main. */
+  sendUserTranscript: (text: string) => void;
 }
