@@ -21,6 +21,19 @@ interface CareyMaryAPI {
   notifyRendererReady: () => void;
   setOverlayPassthrough: (passthrough: boolean) => void;
   quitCareyMary: () => void;
+  logToMain: (message: string) => void;
+}
+
+// Global log helper — forwards to main process terminal AND DevTools console.
+// Lazily binds to window.careymary because the preload bridge is available
+// when this module runs but we guard against missing API.
+function rlog(...args: unknown[]): void {
+  const msg = args
+    .map((a) => (typeof a === 'object' ? JSON.stringify(a) : String(a)))
+    .join(' ');
+  console.log(msg);
+  const bridge = (window as Window & { careymary?: CareyMaryAPI }).careymary;
+  bridge?.logToMain?.(msg);
 }
 
 // ---- Cody's sprite state machine ----
@@ -48,77 +61,100 @@ class AgoraRTCClient {
 
   async join(params: RTCJoinParams): Promise<void> {
     if (!params.enabled) {
-      console.log('[AgoraRTCClient] DRY RUN — would join channel', params.channel, 'as uid', params.uid);
+      rlog('[rtc] DRY RUN — would join channel', params.channel, 'as uid', params.uid);
       this.connected = true;
       return;
     }
     const sdk = (window as any).AgoraRTC;
     if (!sdk) {
-      console.error('[AgoraRTCClient] window.AgoraRTC is missing — script tag did not load');
+      rlog('[rtc] ERROR: window.AgoraRTC is missing — script tag did not load');
       return;
     }
+    rlog('[rtc] sdk version=', sdk.VERSION, 'joining channel=', params.channel, 'as uid=', params.uid);
     this.client = sdk.createClient({ mode: 'rtc', codec: 'vp8' });
 
     // Subscribe listeners BEFORE join so we don't miss the agent's first publish.
     this.client.on('user-published', async (user: any, mediaType: string) => {
-      console.log('[AgoraRTCClient] user-published uid=', user.uid, 'mediaType=', mediaType);
+      rlog('[rtc] user-published uid=', user.uid, 'mediaType=', mediaType);
       if (mediaType !== 'audio') return;
       try {
         await this.client.subscribe(user, mediaType);
         const track = user.audioTrack;
         if (!track) {
-          console.warn('[AgoraRTCClient] subscribe resolved without audioTrack for uid', user.uid);
+          rlog('[rtc] WARN: subscribe resolved without audioTrack for uid', user.uid);
           return;
         }
         track.play();
-        console.log('[AgoraRTCClient] remote audio playing from uid', user.uid);
+        rlog('[rtc] remote audio playing from uid', user.uid);
       } catch (err) {
-        console.error('[AgoraRTCClient] subscribe failed for uid', user.uid, err);
+        rlog('[rtc] ERROR: subscribe failed for uid', user.uid, (err as Error).message ?? err);
       }
     });
 
     this.client.on('user-unpublished', (user: any, mediaType: string) => {
-      console.log('[AgoraRTCClient] user-unpublished uid=', user.uid, 'mediaType=', mediaType);
+      rlog('[rtc] user-unpublished uid=', user.uid, 'mediaType=', mediaType);
     });
 
     this.client.on('user-left', (user: any) => {
-      console.log('[AgoraRTCClient] user-left uid=', user.uid);
+      rlog('[rtc] user-left uid=', user.uid);
     });
 
-    await this.client.join(params.appId, params.channel, params.token, params.uid);
+    this.client.on('connection-state-change', (cur: string, prev: string) => {
+      rlog('[rtc] connection-state-change', prev, '->', cur);
+    });
+
+    try {
+      await this.client.join(params.appId, params.channel, params.token, params.uid);
+      rlog('[rtc] joined channel', params.channel);
+    } catch (err) {
+      rlog('[rtc] ERROR: join failed:', (err as Error).message ?? err);
+      throw err;
+    }
 
     // AEC/ANS/AGC on the Agora Web SDK mic track share a processing pipeline
     // with remote playback. In Electron, clock drift between capture and
     // playback makes the echo canceller drop/clip frames, producing choppy
     // remote audio. Disable the software processors and rely on the OS —
     // macOS CoreAudio handles EC cleanly, and we don't need browser AEC.
-    this.localAudioTrack = await sdk.createMicrophoneAudioTrack({
-      AEC: false,
-      ANS: false,
-      AGC: false,
-    });
-    await this.client.publish([this.localAudioTrack]);
+    try {
+      this.localAudioTrack = await sdk.createMicrophoneAudioTrack({
+        AEC: false,
+        ANS: false,
+        AGC: false,
+      });
+      rlog('[rtc] mic track created');
+    } catch (err) {
+      rlog('[rtc] ERROR: createMicrophoneAudioTrack failed:', (err as Error).message ?? err);
+      throw err;
+    }
+
+    try {
+      await this.client.publish([this.localAudioTrack]);
+      rlog('[rtc] mic published');
+    } catch (err) {
+      rlog('[rtc] ERROR: publish failed:', (err as Error).message ?? err);
+      throw err;
+    }
 
     this.connected = true;
-    console.log('[AgoraRTCClient] joined channel', params.channel);
   }
 
   async leave(): Promise<void> {
     if (!this.connected) return;
     this.localAudioTrack?.close?.();
     this.localAudioTrack = null;
-    try { await this.client?.leave?.(); } catch (e) { console.error(e); }
+    try { await this.client?.leave?.(); } catch (e) { rlog('[rtc] leave error:', (e as Error).message ?? e); }
     this.client = null;
     this.connected = false;
-    console.log('[AgoraRTCClient] left channel');
+    rlog('[rtc] left channel');
   }
 
   setMicEnabled(enabled: boolean): void {
     if (this.localAudioTrack) {
       this.localAudioTrack.setEnabled(enabled);
-      console.log('[AgoraRTCClient] mic', enabled ? 'on' : 'off');
+      rlog('[rtc] mic', enabled ? 'on' : 'off');
     } else {
-      console.log('[AgoraRTCClient] DRY RUN — would set mic to', enabled);
+      rlog('[rtc] DRY RUN — would set mic to', enabled);
     }
   }
 }

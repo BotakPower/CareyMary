@@ -29,15 +29,29 @@ export class AgoraAgent {
   }
 
   async start(systemPrompt: string): Promise<void> {
+    // Use the `preset` shorthand so Agora resolves ASR/LLM/TTS via its own
+    // managed vendor credentials. The explicit-vendor-config path requires
+    // each vendor to be configured in the Agora project console, which isn't
+    // guaranteed — and it produced a zombie agent (task RUNNING but never
+    // publishing audio, likely because the LLM model name `openai_gpt_5_mini`
+    // from our original preset never existed).
+    //
+    // Preset reference: comma-separated vendor:model triples. Use models that
+    // actually exist: gpt-4o-mini for LLM, tts-1 for TTS as a safe OpenAI
+    // fallback that's always available. Minimax is kept as primary since the
+    // voice is better, but if the allocation pool is exhausted we should
+    // switch the preset string below.
     const payload = {
       name: `careymary-${Date.now()}`,
-      preset: 'deepgram_nova_3,openai_gpt_5_mini,minimax_speech_2_6_turbo',
+      preset: 'deepgram_nova_3,openai_gpt_4o_mini,minimax_speech_2_6_turbo',
       properties: {
         channel: this.config.channelName,
         token: this.config.rtcToken,
         agent_rtc_uid: '1001',
-        remote_rtc_uids: ['1002'],
-        idle_timeout: 600,
+        remote_rtc_uids: ['*'],
+        enable_string_uid: false,
+        idle_timeout: 120,
+        asr: { params: { language: 'en' } },
         llm: {
           system_messages: [{ role: 'system', content: systemPrompt }],
           greeting_message:
@@ -50,7 +64,6 @@ export class AgoraAgent {
             voice_setting: { voice_id: 'English_captivating_female1' },
           },
         },
-        asr: { params: { language: 'en' } },
       },
     };
 
@@ -80,6 +93,10 @@ export class AgoraAgent {
 
       const data = (await res.json()) as JoinResponse;
       this.agentId = data.agent_id ?? null;
+      // Log the full response so we can see if there's an unexpected shape
+      // (different id field, error flags, etc.) — we're currently debugging
+      // a "TaskNotFound" that appears a few seconds after /join succeeds.
+      console.log('[AgoraAgent] /join response:', JSON.stringify(data));
       console.log('[AgoraAgent] agent started, agent_id=', this.agentId);
     } catch (err) {
       console.error('[AgoraAgent] start error:', err);
@@ -118,6 +135,23 @@ export class AgoraAgent {
       );
       if (!res.ok) {
         const body = await res.text();
+        // Transient: agent still provisioning or between turns. Next tick succeeds.
+        if (res.status === 400 && body.includes('not in a running state')) {
+          console.warn('[AgoraAgent] agent not yet running — skipping this update');
+          return;
+        }
+        // Terminal: the agent task no longer exists on Agora's side. Clear our
+        // local agentId so we stop pounding /update with a ghost id, and log
+        // loudly so the user knows the agent died and needs to be rejoined.
+        if (res.status === 404 && body.includes('task not found')) {
+          console.error(
+            '[AgoraAgent] agent task vanished on Agora side (TaskNotFound). ' +
+              'Likely causes: renderer never joined the RTC channel, LLM/TTS ' +
+              'vendor call failed, or agent idle-timed out. Clearing local agentId.',
+          );
+          this.agentId = null;
+          return;
+        }
         throw new Error(`Agora /update failed: ${res.status} ${body}`);
       }
       console.log('[AgoraAgent] context updated, prompt length=', newSystemPrompt.length);

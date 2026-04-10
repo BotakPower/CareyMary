@@ -8,6 +8,7 @@ const CHANNELS = {
   stopRTC: 'stop-rtc',
   setMicEnabled: 'set-mic-enabled',
   rendererReady: 'renderer-ready',
+  rendererLog: 'renderer-log',
 } as const;
 
 const api: CareyMaryAPI = {
@@ -31,6 +32,9 @@ const api: CareyMaryAPI = {
   },
   quitCareyMary: () => {
     ipcRenderer.send('overlay:quit');
+  },
+  logToMain: (message: string) => {
+    ipcRenderer.send(CHANNELS.rendererLog, message);
   },
 };
 

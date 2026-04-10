@@ -57,4 +57,6 @@ export interface CareyMaryAPI {
   /** true = mouse passes through overlay; false = receive clicks (exit control). */
   setOverlayPassthrough: (passthrough: boolean) => void;
   quitCareyMary: () => void;
+  /** Forward a renderer log line to the main process terminal. */
+  logToMain: (message: string) => void;
 }

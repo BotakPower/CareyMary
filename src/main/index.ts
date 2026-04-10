@@ -162,10 +162,14 @@ function startContextLoop(): void {
     broadcastCharacterState(overlayWindow, characterState);
   };
 
-  // Fire once immediately for fast feedback, then every 30s.
-  void tick();
+  // Delay the first tick so the Agora agent has time to reach "running" state
+  // after /join returns. Calling /update during provisioning errors with
+  // "task is not in a running state and cannot be updated". 5s is a safe
+  // buffer based on observed provisioning times.
+  const INITIAL_TICK_DELAY_MS = 5_000;
+  setTimeout(() => void tick(), INITIAL_TICK_DELAY_MS);
   contextLoopHandle = setInterval(() => void tick(), CONTEXT_LOOP_MS);
-  console.log('[main] Context loop started');
+  console.log('[main] Context loop started (first tick in 5s)');
 }
 
 /**
@@ -198,10 +202,23 @@ function registerTrayListeners(): void {
 
 function kickRTCOnReady(): void {
   if (!overlayWindow) return;
+  const appId = process.env.AGORA_APP_ID ?? '';
+  const channel = process.env.AGORA_CHANNEL_NAME ?? 'careymary-dev';
+  const token = process.env.AGORA_RTC_TOKEN ?? '';
+  // Print enough of each credential to verify dotenv picked up the fresh
+  // values and that the token matches the channel we're joining. Tokens are
+  // long so we only show the prefix + length.
+  console.log(
+    '[main] RTC credentials:',
+    `appId=...${appId.slice(-6)}`,
+    `channel="${channel}"`,
+    `tokenPrefix=${token.slice(0, 20)}...`,
+    `tokenLength=${token.length}`,
+  );
   requestStartRTC(overlayWindow, {
-    appId: process.env.AGORA_APP_ID ?? '',
-    channel: process.env.AGORA_CHANNEL_NAME ?? 'careymary-dev',
-    token: process.env.AGORA_RTC_TOKEN ?? '',
+    appId,
+    channel,
+    token,
     uid: 1002,
     enabled: AGORA_ENABLED,
   });

@@ -8,6 +8,7 @@ export const IPC_CHANNELS = {
   stopRTC: 'stop-rtc',
   setMicEnabled: 'set-mic-enabled',
   rendererReady: 'renderer-ready',
+  rendererLog: 'renderer-log',
 } as const;
 
 /**
@@ -41,5 +42,14 @@ export function registerMainListeners(onRendererReady: () => void): void {
   ipcMain.on(IPC_CHANNELS.rendererReady, () => {
     console.log('[ipc] renderer-ready received');
     onRendererReady();
+  });
+
+  // Forward renderer logs to the main terminal so we can debug RTC issues
+  // without opening DevTools. The renderer pushes short strings via
+  // window.careymary.logToMain(...).
+  ipcMain.on(IPC_CHANNELS.rendererLog, (_event, message: unknown) => {
+    if (typeof message === 'string') {
+      console.log('[renderer]', message);
+    }
   });
 }
