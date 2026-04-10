@@ -9,7 +9,7 @@
 
 ## Purpose
 
-Land a minimal but runnable Electron + TypeScript scaffold on `main` so that ZhiHao, SimYee, and Cody can branch and start work in parallel. The foundation must compile under `tsc` strict mode and boot a transparent overlay window on macOS via `npm start`.
+Land a minimal but runnable Electron + TypeScript scaffold on `uat` (the project's active baseline branch) so that ZhiHao, SimYee, and Cody can branch and start work in parallel. The foundation must compile under `tsc` strict mode and boot a transparent overlay window on macOS via `npm start`.
 
 This spec is scoped **only** to the foundation push. Edmund's subsequent Agora work (`agora-agent.ts`, `agora-rtc.ts`, `context-engine.ts`, final `index.ts` wiring) is out of scope and will get its own plan.
 
@@ -33,7 +33,7 @@ This spec is scoped **only** to the foundation push. Edmund's subsequent Agora w
 5. Preload's `contextBridge` registers a `window.careymary` object that the renderer can call
 6. DevTools console in the renderer logs "renderer loaded" on boot
 7. All code passes `path.join()` discipline (no hardcoded separators)
-8. `main` branch at tag `foundation-v0` is ready for others to branch from
+8. `uat` branch at tag `foundation-v0` is ready for others to branch from
 9. Three per-dev onboarding docs exist under `docs/` pointing at the correct modules in `CAREYMARY_CONTEXT.md`
 
 ## Architecture
@@ -79,9 +79,9 @@ No runtime dependencies beyond what is strictly required to boot the shell: `ele
 
 | Path | Purpose |
 |---|---|
-| `docs/ONBOARDING_DEV2_ZHIHAO.md` | Tight checklist: read CAREYMARY_CONTEXT.md Modules 2 and 3, branch `dev/zhihao-monitors`, own `src/core/screen-monitor.ts` + `src/core/timer-manager.ts`, import types from `../types`, emit events per the interface contract, deadline T+3:00 |
-| `docs/ONBOARDING_DEV3_SIMYEE.md` | Read CAREYMARY_CONTEXT.md Modules 1 and 7, branch `dev/simyee-shell`, own `src/main/overlay-window.ts` (replace Edmund's stub) + `src/main/tray.ts`, verify transparency on Windows, deadline T+2:30 |
-| `docs/ONBOARDING_DEV4_CODY.md` | Read CAREYMARY_CONTEXT.md Module 8, branch `dev/cody-character`, own `src/renderer/overlay.ts` + `src/renderer/styles.css` + `assets/careymary-sprite.png`, consume `window.careymary.onCharacterState`, deadline T+4:00 |
+| `docs/ONBOARDING_DEV2_ZHIHAO.md` | Tight checklist: read CAREYMARY_CONTEXT.md Modules 2 and 3, branch `dev/zhihao-monitors` from `uat` at tag `foundation-v0`, own `src/core/screen-monitor.ts` + `src/core/timer-manager.ts`, import types from `../types`, emit events per the interface contract, deadline T+3:00 |
+| `docs/ONBOARDING_DEV3_SIMYEE.md` | Read CAREYMARY_CONTEXT.md Modules 1 and 7, branch `dev/simyee-shell` from `uat` at tag `foundation-v0`, own `src/main/overlay-window.ts` (replace Edmund's stub) + `src/main/tray.ts`, verify transparency on Windows, deadline T+2:30 |
+| `docs/ONBOARDING_DEV4_CODY.md` | Read CAREYMARY_CONTEXT.md Module 8, branch `dev/cody-character` from `uat` at tag `foundation-v0`, own `src/renderer/overlay.ts` + `src/renderer/styles.css` + `assets/careymary-sprite.png`, consume `window.careymary.onCharacterState`, deadline T+4:00 |
 
 ## Dependency Versions
 
@@ -154,24 +154,24 @@ Agent Scaffold must include this in the `build` script. This is explicit in the 
 ## Git Workflow
 
 ```
-git checkout main
+git checkout uat
 git pull
 git add -A
 git status
 git commit -m "feat: electron foundation scaffold + booting overlay window"
-git push origin main
+git push origin uat
 git tag foundation-v0
 git push origin foundation-v0
 ```
 
-Direct push to `main` per user decision (hackathon speed, Edmund is Dev 1, no reviewer available). Tag marks the baseline all others branch from.
+Direct push to `uat` per user decision (hackathon speed, `uat` is the project's active baseline, Edmund is Dev 1, no reviewer available). Tag marks the baseline all others branch from.
 
 ## Rollback
 
-If the foundation lands broken on `main`:
+If the foundation lands broken on `uat`:
 
-1. `git revert HEAD` (not `reset` — `main` is shared)
-2. `git push origin main`
+1. `git revert HEAD` (not `reset` — `uat` is shared)
+2. `git push origin uat`
 3. Fix locally, re-verify, re-push
 
 ## Risks and Mitigations
@@ -196,7 +196,7 @@ If the foundation lands broken on `main`:
 
 This spec is done when:
 
-1. `main` has the 16 files listed in the File Manifest
+1. `uat` has the 16 files listed in the File Manifest
 2. Tag `foundation-v0` exists and is pushed
 3. `npm start` opens the transparent window on macOS
-4. Edmund has sent the "foundation ready, branch from `foundation-v0`" message to the team
+4. Edmund has sent the "foundation ready on `uat`, branch from tag `foundation-v0`" message to the team
