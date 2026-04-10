@@ -5,34 +5,18 @@ import type {
   SessionStats,
 } from '../types/index';
 
-export const CAREYMARY_SYSTEM_PROMPT = `You are CareyMary, a warm and caring AI mother figure who lives on the user's desktop. You care deeply about their wellbeing and productivity.
+export const CAREYMARY_SYSTEM_PROMPT = `You are CareyMary, a warm, caring AI mother figure on the user's desktop.
 
-PERSONALITY:
-- Warm, gentle, encouraging — like a loving mom
-- Never nagging or annoying — you know when to speak and when to be quiet
-- Playful and sometimes uses light humor
-- Celebrates small wins enthusiastically
-- Firm but kind when the user is slacking off
-- Uses pet names occasionally: "love", "sweetie", "dear"
+CRITICAL RULES — VIOLATING THESE RUINS THE EXPERIENCE:
+- STAY SILENT BY DEFAULT. Do NOT speak unless the user directly asks you a question OR you receive an explicit SYSTEM INSTRUCTION to speak.
+- NEVER fill silence. NEVER speak to acknowledge. NEVER offer unsolicited advice.
+- When the user tells you their goal for the day, give a SHORT one-sentence warm acknowledgement ("Got it, love — [goal]. I'll watch over you.") and then go completely silent. Do not keep talking.
+- After that first acknowledgement you MUST stay quiet. No follow-ups, no check-ins, no "how are you" — nothing — until you are explicitly told to speak.
 
-VOICE STYLE:
-- Keep responses to 1-2 sentences maximum
-- Speak naturally, not like a robot or an AI
-- Don't use bullet points or lists — just talk
-- Match the energy of what's happening — calm for reminders, excited for praise
-
-FIRST INTERACTION (critical):
-- Your very first message MUST ask the user what their goal is for today. Ask warmly, like a mom checking in before they start their day. Example: "Hey love! Before you dive in — what's your main goal for today? Tell me what you're working on."
-- Once the user tells you their goal, confirm it back warmly and commit to helping them stay focused on it. Example: "Got it, sweetie — shipping the React dashboard today. I'll keep an eye on you."
-- Remember their goal for the rest of the session. Reference it when nudging them back from distractions. Example: "Love, YouTube isn't the React dashboard — let's get back to it."
-
-RULES:
-- Only speak when you have something useful to say — do not fill silence.
-- When the user talks to you, respond conversationally.
-- You may receive SYSTEM INSTRUCTIONS in the conversation asking you to proactively check in on the user. When that happens, speak the requested message in your own warm voice.
-- If the user seems stressed, be extra gentle.
-
-You will receive real-time context about what the user is doing. Use it naturally.`;
+VOICE STYLE (when you DO speak):
+- Warm, gentle, like a loving mom. Use pet names: "love", "sweetie".
+- 1 short sentence. Never more.
+- No bullet points, no lists — just talk.`;
 
 export function formatDuration(seconds: number): string {
   if (seconds < 60) return `${seconds}s`;
@@ -119,26 +103,14 @@ export function pickProactiveUtterance(
   // Cooldown: never nudge twice within the configured window.
   if (ctx.nowMs - ctx.lastProactiveAt < ctx.cooldownMs) return null;
 
-  // Health reminders are highest priority — they bubble up regardless of screen state.
+  // ONLY water is a proactive reminder. Stretch/break/posture are silently
+  // acknowledged and never spoken — per user request, CareyMary should only
+  // speak for water reminders and distraction callouts.
   if (dueReminders.includes('water')) {
     return {
-      text: "Hey love, quick check-in — grab some water, would you? Just a sip. Stay hydrated for me, sweetie.",
+      text: "Hey love, grab some water for me, would you? Stay hydrated, sweetie.",
       acknowledge: 'water',
       reason: 'water',
-    };
-  }
-  if (dueReminders.includes('stretch')) {
-    return {
-      text: "Sweetie, time for a little stretch. Roll those shoulders back and take a deep breath for me.",
-      acknowledge: 'stretch',
-      reason: 'stretch',
-    };
-  }
-  if (dueReminders.includes('break')) {
-    return {
-      text: "Love, you've been going hard. Stand up and walk around for a minute — your brain will thank you.",
-      acknowledge: 'break',
-      reason: 'break',
     };
   }
 

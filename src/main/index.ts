@@ -7,12 +7,8 @@ import { ScreenMonitor } from '../core/screen-monitor';
 import { TimerManager } from '../core/timer-manager';
 import { SessionStatsTracker } from '../core/session-stats';
 import { AgoraAgent } from '../core/agora-agent';
-import { OllamaClient } from '../core/ollama-client';
 import {
-  buildContextPrompt,
-  buildOllamaUserPrompt,
   CAREYMARY_SYSTEM_PROMPT,
-  OLLAMA_ENHANCER_SYSTEM,
   pickCharacterState,
   pickProactiveUtterance,
 } from '../core/context-engine';
@@ -26,9 +22,6 @@ import {
 dotenv.config({ path: path.join(__dirname, '..', '..', '.env') });
 
 const AGORA_ENABLED = (process.env.AGORA_ENABLED ?? 'false').toLowerCase() === 'true';
-const OLLAMA_ENABLED = (process.env.OLLAMA_ENABLED ?? 'false').toLowerCase() === 'true';
-const OLLAMA_URL = process.env.OLLAMA_URL ?? 'http://localhost:11434';
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? 'llama3.1:8b-instruct';
 const CONTEXT_LOOP_MS = 10_000;
 // Don't nudge the user twice inside this window — prevents CareyMary from
 // spamming /speak when the distraction streak stays high across multiple ticks.
@@ -60,7 +53,6 @@ let screenMonitor: ScreenMonitor | null = null;
 let timerManager: TimerManager | null = null;
 let sessionStats: SessionStatsTracker | null = null;
 let agoraAgent: AgoraAgent | null = null;
-let ollamaClient: OllamaClient | null = null;
 let contextLoopHandle: ReturnType<typeof setInterval> | null = null;
 let tickCount = 0;
 let isPaused = false;
@@ -69,6 +61,11 @@ let lastProactiveAt = 0;
 // enforce STARTUP_GRACE_MS — no updates or proactive speech during the
 // goal-collection Q&A at the start of the session.
 let agentJoinedAt = 0;
+// Once we cut the mic after grace, we never turn it back on — CareyMary
+// should ONLY speak scripted /speak nudges (water + distraction), never
+// respond conversationally. This flag makes sure we only send the mic-off
+// IPC once instead of every tick.
+let micCutAfterGrace = false;
 
 function registerOverlayIpcHandlers(): void {
   ipcMain.on('overlay:set-passthrough', (_event, passthrough: unknown) => {
@@ -110,17 +107,6 @@ async function startServices(): Promise<void> {
 
   console.log(`[main] AgoraAgent initialized (enabled=${AGORA_ENABLED})`);
 
-  ollamaClient = new OllamaClient({
-    url: OLLAMA_URL,
-    model: OLLAMA_MODEL,
-    enabled: OLLAMA_ENABLED,
-    timeoutMs: 4000,
-  });
-
-  console.log(
-    `[main] OllamaClient initialized (enabled=${OLLAMA_ENABLED}, url=${OLLAMA_URL}, model=${OLLAMA_MODEL})`,
-  );
-
   try {
     await agoraAgent.start(CAREYMARY_SYSTEM_PROMPT);
     agentJoinedAt = Date.now();
@@ -139,9 +125,7 @@ function startContextLoop(): void {
 
     tickCount++;
     const screenState = screenMonitor.getState();
-    const timerState = timerManager.getState();
     const dueReminders = timerManager.getDueReminders();
-    const stats = sessionStats.getStats();
 
     // Hard grace window: during goal collection (greeting + user response +
     // confirmation) we don't push any /update or /speak, because either of
@@ -164,33 +148,20 @@ function startContextLoop(): void {
       return;
     }
 
-    // Ask the local Ollama co-pilot for a situational directive. Bounded by
-    // the client's internal timeout — if Ollama is down or slow, guidance
-    // stays null and we push the base prompt without it. Never blocks.
-    let guidance: string | null = null;
-    if (ollamaClient?.isEnabled()) {
-      guidance = await ollamaClient.generate(
-        OLLAMA_ENHANCER_SYSTEM,
-        buildOllamaUserPrompt(screenState, timerState, dueReminders, stats),
-      );
-      if (guidance) {
-        console.log('[Ollama] guidance:', guidance);
-      } else {
-        console.log('[Ollama] no guidance this tick (disabled, timeout, or error)');
-      }
+    // First tick AFTER the grace window: cut the mic permanently. CareyMary
+    // only speaks scripted /speak nudges from here on — no ASR listening,
+    // no conversational responses like "you're so sweet". The user already
+    // told us their goal during the grace window; we don't need the mic
+    // again for the rest of the session.
+    if (!micCutAfterGrace) {
+      micCutAfterGrace = true;
+      console.log('[ContextLoop] grace window over — muting mic permanently (scripted nudges only)');
+      requestSetMicEnabled(overlayWindow, false);
     }
 
-    const prompt =
-      CAREYMARY_SYSTEM_PROMPT +
-      '\n\n' +
-      buildContextPrompt(screenState, timerState, dueReminders, stats) +
-      (guidance ? `\n\nLOCAL CO-PILOT DIRECTIVE (from on-device Llama):\n${guidance}` : '');
-
-    try {
-      await agoraAgent.updateContext(prompt);
-    } catch (err) {
-      console.error('[ContextLoop] updateContext failed:', err);
-    }
+    // No continuous /update calls — the system prompt tells CareyMary to
+    // stay silent by default, and pushing context every 10s was making the
+    // LLM ramble. We only talk to the agent via /speak for water + distraction.
 
     // Proactive speech: decide if CareyMary should say something WITHOUT
     // waiting for the user to talk first. Uses Agora's /speak endpoint.
