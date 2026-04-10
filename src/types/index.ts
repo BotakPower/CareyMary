@@ -1,16 +1,15 @@
-// Stub — will be replaced by Edmund's canonical version on merge.
-// Interfaces match CAREYMARY_CONTEXT.md exactly.
-
+// Screen monitoring - CAREYMARY_CONTEXT.md Module 2
 export type AppCategory = 'productive' | 'distraction' | 'neutral' | 'break';
 
 export interface ScreenState {
   appName: string;
   category: AppCategory;
-  activeFor: number;         // seconds on current app
-  distractionStreak: number; // consecutive seconds on distracting apps
-  productiveStreak: number;  // consecutive seconds on productive apps
+  activeFor: number;
+  distractionStreak: number;
+  productiveStreak: number;
 }
 
+// Timer management - CAREYMARY_CONTEXT.md Module 3
 export interface TimerConfig {
   waterIntervalMs: number;
   breakIntervalMs: number;
@@ -29,7 +28,17 @@ export interface TimerState {
 
 export type ReminderType = 'water' | 'break' | 'posture' | 'stretch';
 
+// Session stats - consumed by context engine
 export interface SessionStats {
-  productiveTime: number;   // seconds
-  distractionTime: number;  // seconds
+  productiveTime: number;
+  distractionTime: number;
+  startedAt: number;
+}
+
+// Character animation - CAREYMARY_CONTEXT.md Module 8
+export type CharacterState = 'idle' | 'talking' | 'alert' | 'happy' | 'sleeping';
+
+// Preload bridge contract - what the renderer sees on window.careymary
+export interface CareyMaryAPI {
+  onCharacterState: (callback: (state: CharacterState) => void) => void;
 }

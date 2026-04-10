@@ -1,14 +1,15 @@
 {
   "name": "careymary",
   "version": "0.1.0",
+  "description": "Desktop productivity companion for people with ADHD",
   "main": "dist/main/index.js",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node -e \"const fs=require('fs'),path=require('path');const src=path.join('src','renderer');const dst=path.join('dist','renderer');fs.mkdirSync(dst,{recursive:true});for(const f of fs.readdirSync(src)){if(f.endsWith('.html')||f.endsWith('.css'))fs.copyFileSync(path.join(src,f),path.join(dst,f));}\"",
     "start": "npm run build && electron .",
     "dev": "tsc --watch & electron .",
     "test": "node --require ts-node/register --test tests/**/*.test.ts",
-    "package:mac": "electron-builder --mac",
-    "package:win": "electron-builder --win"
+    "package:mac": "npm run build && electron-builder --mac",
+    "package:win": "npm run build && electron-builder --win"
   },
   "dependencies": {
     "active-win": "^9.0.0",

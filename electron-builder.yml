@@ -1,0 +1,13 @@
+appId: com.careymary.app
+productName: CareyMary
+directories:
+  output: release
+files:
+  - dist/**/*
+  - package.json
+  - assets/**/*
+mac:
+  target: dmg
+  category: public.app-category.productivity
+win:
+  target: nsis
