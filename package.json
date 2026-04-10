@@ -4,7 +4,7 @@
   "description": "Desktop productivity companion for people with ADHD",
   "main": "dist/main/index.js",
   "scripts": {
-    "build": "tsc && node -e \"const fs=require('fs'),path=require('path');const src=path.join('src','renderer');const dst=path.join('dist','renderer');fs.mkdirSync(dst,{recursive:true});for(const f of fs.readdirSync(src)){if(f.endsWith('.html')||f.endsWith('.css'))fs.copyFileSync(path.join(src,f),path.join(dst,f));}\"",
+    "build": "tsc && node scripts/copy-renderer-assets.js",
     "start": "npm run build && electron .",
     "dev": "tsc --watch & electron .",
     "test": "node --require ts-node/register --test tests/**/*.test.ts",

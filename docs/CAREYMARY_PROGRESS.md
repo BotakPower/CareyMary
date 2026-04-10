@@ -23,7 +23,7 @@
 | IPC wiring + main loop | Edmund | ✅ shipped | `src/main/ipc-handlers.ts`, `src/preload/preload.ts`, `src/main/index.ts` |
 | RTC test harness | Edmund | ✅ shipped | `test-harness/rtc-test.html` |
 | System tray | SimYee | ✅ merged (needs wiring into main/index.ts) | `src/main/tray.ts` |
-| Character sprite UI | Cody | ⬜ not started | `src/renderer/overlay.ts`, `src/renderer/styles.css`, `assets/careymary-sprite.png` |
+| Character sprite UI | Cody + Edmund | ✅ merged (sprite via CSS state classes; co-lives with RTC client in overlay.ts) | `src/renderer/overlay.ts`, `src/renderer/styles.css`, `src/renderer/careymary-spritesheet.png`, `scripts/copy-renderer-assets.js` |
 | Real Agora credentials | ZhiHao | ⬜ not started | `.env` |
 
 ---
@@ -47,6 +47,13 @@
 - Context loop: 30s tick builds prompt from ScreenMonitor + TimerManager + SessionStats, pushes to AgoraAgent, broadcasts character-state to overlay
 - **Screen monitor swap:** active-win's native N-API binary wouldn't self-register under Electron 33's ABI even after `electron-rebuild`; swapped to `get-windows` (maintained successor, uses a spawned Swift binary — no N-API rebuild needed). macOS grants screen recording permission on first run.
 - Smoke test ✅: `app=Warp category=productive`, zero errors, DRY RUN logs fire every 30s
+
+### 2026-04-10 — Dev 4 Character Sprite (Cody → merged into uat)
+- 2×2 spritesheet (`src/renderer/careymary-spritesheet.png`), CSS-driven animation via `.state-idle/.state-talking/.state-alert/.state-happy/.state-sleeping` on `#character`
+- `scripts/copy-renderer-assets.js` replaces the inline build step so `.png` assets ship into `dist/renderer/`
+- `src/main/overlay-window.ts` — merge kept Edmund's macOS visibility fixes (`focusable: true`, `setVisibleOnAllWorkspaces`, `ready-to-show`)
+- **Conflict resolution:** `src/renderer/overlay.ts` merged Cody's sprite state machine with Edmund's inlined `AgoraRTCClient` — one file now owns both the visual layer and the RTC client
+- **Conflict resolution:** `src/renderer/index.html` — kept Cody's empty `#character` div + ARIA, kept Edmund's Agora SDK `<script>` tag
 
 ### 2026-04-10 — Dev 3 System Tray (SimYee) — MERGED
 - `src/main/tray.ts` — tray icon + context menu (mute mic, pause, ack water, ack break, quit)
@@ -89,7 +96,7 @@ npm start
 1. ✅ T+0: Edmund foundation (`foundation-v0` tag)
 2. ✅ T+0: ZhiHao monitors (merged into `ZM`)
 3. ✅ T+3:30: Edmund Agora + context + wiring (on `ZM`, ready for `uat` merge)
-4. ⬜ T+?: SimYee tray → merges to `uat`
-5. ⬜ T+?: Cody character sprite → merges to `uat`
+4. ✅ T+?: SimYee tray → merged to `uat`
+5. ✅ T+?: Cody character sprite → merged to `uat`
 6. ⬜ T+5:00: Demo rehearsal + bug bash
 7. ⬜ T+6:00: Submit

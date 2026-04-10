@@ -1,7 +1,7 @@
 // NOTE: This file is loaded as a plain script, not as an ES module.
 // It must have no top-level imports/exports or tsc will emit CommonJS
 // wrappers that reference `exports` (undefined in the browser context).
-// Cody replaces this stub with the real sprite animation later.
+// Renders Cody's sprite via CSS state classes + owns the Agora RTC client.
 
 type CharacterState = 'idle' | 'talking' | 'alert' | 'happy' | 'sleeping';
 
@@ -21,8 +21,24 @@ interface CareyMaryAPI {
   notifyRendererReady: () => void;
 }
 
-// Inline AgoraRTCClient — duplicated from src/core/agora-rtc.ts because the
-// renderer is a plain script and can't import. Keep in sync manually.
+// ---- Cody's sprite state machine ----
+const STATE_CLASSES: CharacterState[] = [
+  'idle',
+  'talking',
+  'alert',
+  'happy',
+  'sleeping',
+];
+
+function applyCharacterState(el: HTMLElement, state: CharacterState) {
+  for (const s of STATE_CLASSES) {
+    el.classList.remove(`state-${s}`);
+  }
+  el.classList.add(`state-${state}`);
+}
+
+// ---- Agora RTC client (inlined from src/core/agora-rtc.ts because the ----
+// renderer is a plain script and can't import — keep in sync manually).
 class AgoraRTCClient {
   private client: any = null;
   private localAudioTrack: any = null;
@@ -78,15 +94,24 @@ console.log('[renderer] loaded');
 
 const rtc = new AgoraRTCClient();
 const characterEl = document.getElementById('character');
-
 const api = (window as Window & { careymary?: CareyMaryAPI }).careymary;
+
+if (!characterEl) {
+  console.warn('[renderer] #character missing');
+}
 if (!api) {
   console.warn('[renderer] window.careymary not available — preload failed?');
-} else {
+}
+
+if (characterEl) {
+  applyCharacterState(characterEl, 'idle');
+}
+
+if (api) {
   api.onCharacterState((state) => {
     console.log('[renderer] character-state:', state);
     if (characterEl) {
-      characterEl.textContent = `CareyMary · ${state}`;
+      applyCharacterState(characterEl, state);
     }
   });
 
