@@ -124,6 +124,18 @@ async function startServices(): Promise<void> {
   try {
     await agoraAgent.start(CAREYMARY_SYSTEM_PROMPT);
     agentJoinedAt = Date.now();
+    // Belt-and-suspenders: deliver the REAL first question via /speak with
+    // interruptable:false. Agora's server enforces no-interruption, so mic
+    // noise / feedback can't cut it off (unlike greeting_message, which is
+    // interruptable by design). Delay gives the agent time to reach RUNNING
+    // state after /join returns — if it fires too early we get a 400
+    // "not in a running state" (handled gracefully in speak()).
+    setTimeout(() => {
+      void agoraAgent?.speak(
+        'What are you working on today?',
+        'INTERRUPT',
+      );
+    }, 3_000);
   } catch (err) {
     console.error('[main] AgoraAgent.start failed:', err);
   }
