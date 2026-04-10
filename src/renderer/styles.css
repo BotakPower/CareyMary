@@ -3,11 +3,11 @@
  * --s scales the character to fit the ~200×200 overlay window.
  */
 :root {
-  --s: 0.19;
-  --frame-w: calc(1024px * var(--s));
-  --frame-h: calc(869px * var(--s));
-  --sheet-w: calc(2048px * var(--s));
-  --sheet-h: calc(1738px * var(--s));
+  --s: 0.38;
+  --frame-w: calc(512px * var(--s));
+  --frame-h: calc(512px * var(--s));
+  --sheet-w: calc(1024px * var(--s));
+  --sheet-h: calc(1024px * var(--s));
 }
 
 html, body {
@@ -63,7 +63,7 @@ body {
   flex-shrink: 0;
   padding: 0;
   box-sizing: border-box;
-  background-image: url('careymary-spritesheet.png');
+  background-image: url('../../assets/careymary.png');
   background-repeat: no-repeat;
   background-size: var(--sheet-w) var(--sheet-h);
   image-rendering: pixelated;
