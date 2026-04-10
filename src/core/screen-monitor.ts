@@ -84,9 +84,14 @@ export class ScreenMonitor extends EventEmitter {
 
   private async tick(): Promise<void> {
     try {
-      // Dynamic import — active-win is ESM only
-      const activeWin = await import('active-win');
-      const result = await activeWin.activeWindow();
+      // Dynamic import — get-windows is ESM only. We use `new Function` to prevent
+      // tsc from compiling `import()` down to `require()` under module: commonjs,
+      // which would throw ERR_REQUIRE_ESM at runtime. get-windows is the maintained
+      // successor to active-win; it spawns a bundled Swift binary on macOS (no
+      // native N-API rebuild required).
+      const dynamicImport = new Function('specifier', 'return import(specifier)');
+      const getWindows: typeof import('get-windows') = await dynamicImport('get-windows');
+      const result = await getWindows.activeWindow();
 
       const now = Date.now();
       const elapsed = Math.max(0, Math.floor((now - this.lastTickTime) / 1000));
