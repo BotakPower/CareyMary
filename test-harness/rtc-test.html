@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>CareyMary Agora RTC Test Harness</title>
+  <style>
+    body { font-family: -apple-system, sans-serif; max-width: 640px; margin: 2rem auto; padding: 1rem; }
+    input, button { display: block; width: 100%; padding: 0.5rem; margin: 0.25rem 0; font-size: 1rem; box-sizing: border-box; }
+    button { cursor: pointer; background: #0a7; color: white; border: 0; }
+    button:disabled { background: #aaa; cursor: not-allowed; }
+    .row { display: flex; gap: 0.5rem; }
+    .row > * { flex: 1; }
+    #log { background: #111; color: #0f0; padding: 0.5rem; height: 240px; overflow: auto; font-family: monospace; font-size: 12px; white-space: pre-wrap; }
+    label { font-size: 12px; color: #555; display: block; margin-top: 0.5rem; }
+    h1 { margin-bottom: 0.25rem; }
+    p { color: #666; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <h1>CareyMary Agora RTC Test Harness</h1>
+  <p>Standalone test page — no Electron needed. Fill credentials, click Join, speak, verify you hear the ConvoAI agent back. Use this to validate Agora credentials before debugging anything inside Electron.</p>
+
+  <label>App ID</label>
+  <input id="appId" placeholder="agora app id">
+
+  <label>Channel</label>
+  <input id="channel" value="careymary-dev">
+
+  <label>RTC Token</label>
+  <input id="token" placeholder="temp token from Agora Console">
+
+  <label>UID</label>
+  <input id="uid" type="number" value="1002">
+
+  <div class="row">
+    <button id="joinBtn">Join</button>
+    <button id="leaveBtn" disabled>Leave</button>
+    <button id="muteBtn" disabled>Mute</button>
+  </div>
+
+  <h3>Log</h3>
+  <div id="log"></div>
+
+  <script src="https://download.agora.io/sdk/release/AgoraRTC_N-4.23.2.js"></script>
+  <script>
+    const logEl = document.getElementById('log');
+    const joinBtn = document.getElementById('joinBtn');
+    const leaveBtn = document.getElementById('leaveBtn');
+    const muteBtn = document.getElementById('muteBtn');
+
+    let client = null;
+    let localTrack = null;
+    let muted = false;
+
+    function log(...args) {
+      const line = args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');
+      logEl.textContent += line + '\n';
+      logEl.scrollTop = logEl.scrollHeight;
+      console.log(...args);
+    }
+
+    if (!window.AgoraRTC) {
+      log('ERROR: AgoraRTC SDK failed to load');
+    } else {
+      log('AgoraRTC SDK loaded, version:', AgoraRTC.VERSION);
+    }
+
+    joinBtn.addEventListener('click', async () => {
+      const appId = document.getElementById('appId').value.trim();
+      const channel = document.getElementById('channel').value.trim();
+      const token = document.getElementById('token').value.trim();
+      const uid = parseInt(document.getElementById('uid').value, 10);
+
+      if (!appId || !channel || !token) {
+        log('ERROR: fill appId, channel, and token');
+        return;
+      }
+
+      try {
+        client = AgoraRTC.createClient({ mode: 'rtc', codec: 'vp8' });
+        log('joining...', { channel, uid });
+        await client.join(appId, channel, token, uid);
+        log('joined');
+
+        localTrack = await AgoraRTC.createMicrophoneAudioTrack({ AEC: true, ANS: true, AGC: true });
+        await client.publish([localTrack]);
+        log('published mic');
+
+        client.on('user-published', async (user, mediaType) => {
+          log('user-published', user.uid, mediaType);
+          if (mediaType === 'audio') {
+            await client.subscribe(user, mediaType);
+            user.audioTrack && user.audioTrack.play();
+            log('playing remote audio from', user.uid);
+          }
+        });
+
+        joinBtn.disabled = true;
+        leaveBtn.disabled = false;
+        muteBtn.disabled = false;
+      } catch (err) {
+        log('join failed:', err.message || err);
+      }
+    });
+
+    leaveBtn.addEventListener('click', async () => {
+      try {
+        localTrack && localTrack.close();
+        client && await client.leave();
+        log('left');
+      } catch (err) {
+        log('leave failed:', err.message || err);
+      }
+      joinBtn.disabled = false;
+      leaveBtn.disabled = true;
+      muteBtn.disabled = true;
+    });
+
+    muteBtn.addEventListener('click', () => {
+      muted = !muted;
+      localTrack && localTrack.setEnabled(!muted);
+      muteBtn.textContent = muted ? 'Unmute' : 'Mute';
+      log(muted ? 'muted' : 'unmuted');
+    });
+  </script>
+</body>
+</html>
