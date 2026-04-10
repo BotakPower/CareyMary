@@ -5,19 +5,12 @@
 
 type CharacterState = 'idle' | 'talking' | 'alert' | 'happy' | 'sleeping';
 
-<<<<<<< HEAD
-interface CareyMaryAPI {
-  onCharacterState: (callback: (state: CharacterState) => void) => void;
-  setOverlayPassthrough: (passthrough: boolean) => void;
-  quitCareyMary: () => void;
-=======
 interface RTCJoinParams {
   appId: string;
   channel: string;
   token: string;
   uid: number;
   enabled: boolean;
->>>>>>> da7a0e01d0082500d72088f2e63e2a0f73da52bd
 }
 
 interface CareyMaryAPI {
@@ -26,6 +19,8 @@ interface CareyMaryAPI {
   onStopRTC: (callback: () => void) => void;
   onSetMicEnabled: (callback: (enabled: boolean) => void) => void;
   notifyRendererReady: () => void;
+  setOverlayPassthrough: (passthrough: boolean) => void;
+  quitCareyMary: () => void;
 }
 
 // ---- Cody's sprite state machine ----
@@ -44,61 +39,6 @@ function applyCharacterState(el: HTMLElement, state: CharacterState) {
   el.classList.add(`state-${state}`);
 }
 
-<<<<<<< HEAD
-const el = document.getElementById('character');
-const exitBtn = document.getElementById('exit-careymary');
-const api = (window as Window & { careymary?: CareyMaryAPI }).careymary;
-
-function wireExitControl(bridge: CareyMaryAPI): void {
-  if (!exitBtn) {
-    return;
-  }
-
-  let passthrough = true;
-
-  function setPassthrough(next: boolean): void {
-    if (next === passthrough) {
-      return;
-    }
-    passthrough = next;
-    bridge.setOverlayPassthrough(next);
-  }
-
-  document.addEventListener(
-    'mousemove',
-    (ev: MouseEvent) => {
-      const r = exitBtn.getBoundingClientRect();
-      const over =
-        ev.clientX >= r.left &&
-        ev.clientX <= r.right &&
-        ev.clientY >= r.top &&
-        ev.clientY <= r.bottom;
-      setPassthrough(!over);
-    },
-    { passive: true },
-  );
-
-  document.addEventListener('mouseleave', () => {
-    setPassthrough(true);
-  });
-
-  exitBtn.addEventListener('click', () => {
-    bridge.quitCareyMary();
-  });
-}
-
-if (!el) {
-  console.warn('#character missing');
-} else {
-  applyCharacterState(el, 'idle');
-  if (api) {
-    api.onCharacterState((state) => {
-      applyCharacterState(el, state);
-    });
-    wireExitControl(api);
-  } else {
-    console.warn('window.careymary not available - preload failed?');
-=======
 // ---- Agora RTC client (inlined from src/core/agora-rtc.ts because the ----
 // renderer is a plain script and can't import — keep in sync manually).
 class AgoraRTCClient {
@@ -149,8 +89,49 @@ class AgoraRTCClient {
     } else {
       console.log('[AgoraRTCClient] DRY RUN — would set mic to', enabled);
     }
->>>>>>> da7a0e01d0082500d72088f2e63e2a0f73da52bd
   }
+}
+
+// ---- Exit button / passthrough toggle (Cody's work) ----
+// The overlay is click-through by default. When the mouse hovers the exit
+// button, temporarily turn off passthrough so the button can receive the click.
+function wireExitControl(bridge: CareyMaryAPI): void {
+  const exitBtn = document.getElementById('exit-careymary');
+  if (!exitBtn) {
+    return;
+  }
+
+  let passthrough = true;
+
+  function setPassthrough(next: boolean): void {
+    if (next === passthrough) {
+      return;
+    }
+    passthrough = next;
+    bridge.setOverlayPassthrough(next);
+  }
+
+  document.addEventListener(
+    'mousemove',
+    (ev: MouseEvent) => {
+      const r = exitBtn!.getBoundingClientRect();
+      const over =
+        ev.clientX >= r.left &&
+        ev.clientX <= r.right &&
+        ev.clientY >= r.top &&
+        ev.clientY <= r.bottom;
+      setPassthrough(!over);
+    },
+    { passive: true },
+  );
+
+  document.addEventListener('mouseleave', () => {
+    setPassthrough(true);
+  });
+
+  exitBtn.addEventListener('click', () => {
+    bridge.quitCareyMary();
+  });
 }
 
 console.log('[renderer] loaded');
@@ -192,6 +173,8 @@ if (api) {
     console.log('[renderer] onSetMicEnabled', enabled);
     rtc.setMicEnabled(enabled);
   });
+
+  wireExitControl(api);
 
   api.notifyRendererReady();
 }

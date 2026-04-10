@@ -1,10 +1,6 @@
-<<<<<<< HEAD
-import { app, BrowserWindow, ipcMain } from 'electron';
-=======
 import { app, BrowserWindow, Tray, ipcMain } from 'electron';
 import * as path from 'path';
 import * as dotenv from 'dotenv';
->>>>>>> da7a0e01d0082500d72088f2e63e2a0f73da52bd
 import { createOverlayWindow } from './overlay-window';
 import { createTray } from './tray';
 import { ScreenMonitor } from '../core/screen-monitor';
@@ -42,7 +38,6 @@ let contextLoopHandle: ReturnType<typeof setInterval> | null = null;
 let tickCount = 0;
 let isPaused = false;
 
-<<<<<<< HEAD
 function registerOverlayIpcHandlers(): void {
   ipcMain.on('overlay:set-passthrough', (_event, passthrough: unknown) => {
     if (typeof passthrough !== 'boolean') {
@@ -59,9 +54,6 @@ function registerOverlayIpcHandlers(): void {
   });
 }
 
-app.whenReady().then(() => {
-  registerOverlayIpcHandlers();
-=======
 async function startServices(): Promise<void> {
   screenMonitor = new ScreenMonitor();
   timerManager = new TimerManager();
@@ -173,7 +165,8 @@ function kickRTCOnReady(): void {
 }
 
 app.whenReady().then(async () => {
->>>>>>> da7a0e01d0082500d72088f2e63e2a0f73da52bd
+  registerOverlayIpcHandlers();
+
   overlayWindow = createOverlayWindow();
 
   registerMainListeners(() => {
