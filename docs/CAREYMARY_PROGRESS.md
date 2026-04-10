@@ -22,7 +22,7 @@
 | Agora RTC client | Edmund | ✅ shipped (dry-run) | `src/core/agora-rtc.ts` |
 | IPC wiring + main loop | Edmund | ✅ shipped | `src/main/ipc-handlers.ts`, `src/preload/preload.ts`, `src/main/index.ts` |
 | RTC test harness | Edmund | ✅ shipped | `test-harness/rtc-test.html` |
-| System tray | SimYee | ✅ merged (needs wiring into main/index.ts) | `src/main/tray.ts` |
+| System tray | SimYee + Edmund | ✅ shipped (wired into main/index.ts) | `src/main/tray.ts`, `src/main/index.ts` |
 | Character sprite UI | Cody + Edmund | ✅ merged (sprite via CSS state classes; co-lives with RTC client in overlay.ts) | `src/renderer/overlay.ts`, `src/renderer/styles.css`, `src/renderer/careymary-spritesheet.png`, `scripts/copy-renderer-assets.js` |
 | Real Agora credentials | ZhiHao | ⬜ not started | `.env` |
 
@@ -63,7 +63,11 @@
   - `tray:ack-water`
   - `tray:ack-break`
 - Placeholder transparent PNG used until `assets/tray-icon.png` lands
-- **Still to do (Edmund):** call `createTray()` in `main/index.ts` bootstrap and wire `ipcMain.on('tray:*')` handlers to `AgoraAgent` / `TimerManager`
+- **Wired by Edmund in `main/index.ts`:**
+  - `tray:mic-toggle` → `requestSetMicEnabled(overlayWindow, !muted)` (bridges to the renderer's AgoraRTCClient)
+  - `tray:pause-toggle` → module-level `isPaused` flag; context loop tick returns early when paused
+  - `tray:ack-water` / `tray:ack-break` → `timerManager.acknowledge('water' | 'break')`
+  - Tray created in `app.whenReady`, destroyed in `before-quit`
 
 ### 2026-04-10 — Dev 2 Real Agora Credentials (ZhiHao) — NOT STARTED
 - Fill `.env` with `AGORA_APP_ID`, `AGORA_CUSTOMER_ID`, `AGORA_CUSTOMER_SECRET`, `AGORA_RTC_TOKEN`

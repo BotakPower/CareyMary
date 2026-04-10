@@ -1,7 +1,8 @@
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, Tray, ipcMain } from 'electron';
 import * as path from 'path';
 import * as dotenv from 'dotenv';
 import { createOverlayWindow } from './overlay-window';
+import { createTray } from './tray';
 import { ScreenMonitor } from '../core/screen-monitor';
 import { TimerManager } from '../core/timer-manager';
 import { SessionStatsTracker } from '../core/session-stats';
@@ -14,6 +15,7 @@ import {
 import {
   broadcastCharacterState,
   requestStartRTC,
+  requestSetMicEnabled,
   registerMainListeners,
 } from './ipc-handlers';
 
@@ -23,12 +25,14 @@ const AGORA_ENABLED = (process.env.AGORA_ENABLED ?? 'false').toLowerCase() === '
 const CONTEXT_LOOP_MS = 30_000;
 
 let overlayWindow: BrowserWindow | null = null;
+let tray: Tray | null = null;
 let screenMonitor: ScreenMonitor | null = null;
 let timerManager: TimerManager | null = null;
 let sessionStats: SessionStatsTracker | null = null;
 let agoraAgent: AgoraAgent | null = null;
 let contextLoopHandle: ReturnType<typeof setInterval> | null = null;
 let tickCount = 0;
+let isPaused = false;
 
 async function startServices(): Promise<void> {
   screenMonitor = new ScreenMonitor();
@@ -64,6 +68,10 @@ async function startServices(): Promise<void> {
 function startContextLoop(): void {
   const tick = async (): Promise<void> => {
     if (!screenMonitor || !timerManager || !sessionStats || !agoraAgent || !overlayWindow) return;
+    if (isPaused) {
+      console.log('[ContextLoop] paused — skipping tick');
+      return;
+    }
 
     tickCount++;
     const screenState = screenMonitor.getState();
@@ -97,6 +105,34 @@ function startContextLoop(): void {
   console.log('[main] Context loop started');
 }
 
+/**
+ * Wire tray context-menu clicks into the running services.
+ * SimYee's tray.ts fires synthetic ipcMain events — we bridge them here.
+ */
+function registerTrayListeners(): void {
+  ipcMain.on('tray:mic-toggle', (_event, muted: boolean) => {
+    console.log('[tray] mic-toggle muted=', muted);
+    if (overlayWindow) {
+      requestSetMicEnabled(overlayWindow, !muted);
+    }
+  });
+
+  ipcMain.on('tray:pause-toggle', (_event, paused: boolean) => {
+    console.log('[tray] pause-toggle paused=', paused);
+    isPaused = paused;
+  });
+
+  ipcMain.on('tray:ack-water', () => {
+    console.log('[tray] ack-water');
+    timerManager?.acknowledge('water');
+  });
+
+  ipcMain.on('tray:ack-break', () => {
+    console.log('[tray] ack-break');
+    timerManager?.acknowledge('break');
+  });
+}
+
 function kickRTCOnReady(): void {
   if (!overlayWindow) return;
   requestStartRTC(overlayWindow, {
@@ -115,6 +151,15 @@ app.whenReady().then(async () => {
     kickRTCOnReady();
   });
 
+  registerTrayListeners();
+
+  try {
+    tray = createTray();
+    console.log('[main] Tray created');
+  } catch (err) {
+    console.error('[main] Failed to create tray:', err);
+  }
+
   await startServices();
   startContextLoop();
 
@@ -130,6 +175,7 @@ app.on('before-quit', async () => {
   screenMonitor?.stop();
   timerManager?.stop();
   if (agoraAgent) await agoraAgent.stop();
+  tray?.destroy();
 });
 
 app.on('window-all-closed', () => {
