@@ -38,7 +38,20 @@ export interface SessionStats {
 // Character animation - CAREYMARY_CONTEXT.md Module 8
 export type CharacterState = 'idle' | 'talking' | 'alert' | 'happy' | 'sleeping';
 
+// Agora RTC connection parameters passed from main to renderer
+export interface RTCJoinParams {
+  appId: string;
+  channel: string;
+  token: string;
+  uid: number;
+  enabled: boolean; // false = dry-run
+}
+
 // Preload bridge contract - what the renderer sees on window.careymary
 export interface CareyMaryAPI {
   onCharacterState: (callback: (state: CharacterState) => void) => void;
+  onStartRTC: (callback: (params: RTCJoinParams) => void) => void;
+  onStopRTC: (callback: () => void) => void;
+  onSetMicEnabled: (callback: (enabled: boolean) => void) => void;
+  notifyRendererReady: () => void;
 }
